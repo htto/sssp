@@ -176,7 +176,7 @@ captureScreenShot(Display *dpy, Window win, int *w, int *h)
     XImage *image;
     XWindowAttributes attrs;
     uint8_t *data;
-    int i, j;
+    int i;
 
     /* XGrabServer(dpy); */
     if (XGetWindowAttributes(dpy, win, &attrs) == 0 ||
@@ -214,7 +214,7 @@ handleScreenShot(Display *dpy, Window win)
 {
     int w, h;
 #if 0
-    /* Hand made fallback disabled in favour of Steam's screenshot writer.
+    /* Hand made fallback disabled in favour of Steam's screenshot writer. */
     static uint32_t count = 0;
     char path[512];
     char date[11];
