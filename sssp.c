@@ -253,14 +253,27 @@ filter(Display *dpy, XEvent *event, XPointer arg)
     if (event->type == KeyPress /*|| event->type == KeyRelease*/)
     {
 	XKeyEvent *ke = (XKeyEvent *)event;
-	KeySym keysym = XLookupKeysym(ke, 0);
-	if (keysym == XK_F12)
+	if (!ke->send_event && !ke->state /* modifiers */)
 	{
+	    KeySym keysym = XLookupKeysym(ke, 0);
+	    if (keysym == XK_F12)
+	    {
+		static Time t = 0;
+		/* Let's not run havoc on too many events (KeyRepeat?). Allow every 50ms */
+		if (ke->time - t > 50)
+		{
+		    t = ke->time;
 #ifdef DEBUG
-	    fprintf(stderr, "keysym: 0x%lx\n", keysym);
+		    fprintf(stderr, "keysym: 0x%lx\n", keysym);
 #endif
-	    return True;
+		    return True;
+		}
+#ifdef DEBUG
+		fprintf(stderr, "keysym skipped: 0x%lx\n", keysym);
+#endif
+	    }
 	}
+
     }
     return False;
 }
