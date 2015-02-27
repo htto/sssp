@@ -99,6 +99,7 @@ typedef int (*hookPFunc)(void *, ...);
 hookFunc _realSteamAPI_Init;
 hookFunc _realSteamAPI_InitSafe;
 hookPFunc _realXEventsQueued;
+hookPFunc _realXLookupString;
 hookPFunc _realXPending;
 
 static SteamID steamUserID;
@@ -123,12 +124,13 @@ __attribute__((constructor)) void
 init(void)
 {
     _realXEventsQueued = (hookPFunc)findHook(NULL, "XEventsQueued");
+    _realXLookupString = (hookPFunc)findHook(NULL, "XLookupString");
     _realXPending = (hookPFunc)findHook(NULL, "XPending");
     /* We need symbols from libsteam_api, so require it to be loaded. */
     _realSteamAPI_Init = (hookFunc)findHook("libsteam_api.so", "SteamAPI_Init");
     _realSteamAPI_InitSafe = (hookFunc)findHook("libsteam_api.so", "SteamAPI_InitSafe");
 
-    if (!(_realXEventsQueued && _realXPending &&
+    if (!(_realXEventsQueued && _realXLookupString && _realXPending &&
 	    _realSteamAPI_Init && _realSteamAPI_InitSafe))
     {
 	fprintf(stderr, "ERROR: Unable to set up hooks. Won't work this way."
@@ -345,13 +347,32 @@ steamSetup(void)
 extern int
 XEventsQueued(Display *dpy, int mode)
 {
+#ifdef DEBUG
+    fprintf(stderr, "XEventsQueued\n");
+#endif
     handleRequest(dpy);
     return _realXEventsQueued(dpy, mode);
 }
 
 extern int
+XLookupString(XKeyEvent *ke, char *bufret, int bufsiz, KeySym *keysym, XComposeStatus *status_in_out)
+{
+#ifdef DEBUG
+    fprintf(stderr, "XLookupString\n");
+#endif
+    if (filter(ke->display, (XEvent *)ke, NULL))
+    {
+	handleScreenShot(ke->display, ke->window);
+    }
+    return _realXLookupString(ke, bufret, bufsiz, keysym, status_in_out);
+}
+
+extern int
 XPending(Display *dpy)
 {
+#ifdef DEBUG
+    fprintf(stderr, "XPending\n");
+#endif
     handleRequest(dpy);
     return _realXPending(dpy);
 }
