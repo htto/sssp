@@ -7,6 +7,7 @@ use much of it besides the screenshot feature.
 
 Just edit the game's launch options to something like:
 - env LD_PRELOAD=/path/to/this/sssp_XY.so:$LD_PRELOAD %command%
+
 Or even:
 - env LD_PRELOAD=/path/to/this/sssp_32.so:/path/to/this/sssp_64.so:$LD_PRELOAD %command%
 
