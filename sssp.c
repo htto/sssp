@@ -1,7 +1,7 @@
 /**
  *
- * A small LD_PRELOAD library for steam games, that captures a game Screenshot
- * when 
+ * A small LD_PRELOAD library for steam games, that captures a game screenshot
+ * when the hotkey (XK_F12) is hit.
  *
  * gcc -m32 -o sssp_32.so sssp.c -shared -fPIC `pkg-config --cflags --libs x11`
  * gcc -m64 -o sssp_64.so sssp.c -shared -fPIC `pkg-config --cflags --libs x11`
@@ -43,15 +43,17 @@ typedef union
     uint64_t as64Bit;
 } SteamID;
 
-/* Basically the all-pure-virtual ISteamScreenshots handle is the virtual table. */
+/* Basically the all-pure-virtual ISteam* handle is the virtual table. */
+
 typedef struct
 {
     struct {
+	/* pure RGB (8bit per chan) data, data size (3 * w * h), image width, image height */
 	uint32_t (*WriteScreenshot)(void *thiz, void *pubRGB, uint32_t cubRGB, int w, int h);
 	/* ... */
     } *vtab;
 } ISteamScreenshots;
-/* Basically the all-pure-virtual ISteamUser handle is the virtual table. */
+
 typedef struct
 {
     struct {
@@ -60,7 +62,7 @@ typedef struct
 	/* ... */
     } *vtab;
 } ISteamUser;
-/* Basically the all-pure-virtual ISteamUtils handle is the virtual table. */
+
 typedef struct
 {
     struct {
@@ -69,7 +71,7 @@ typedef struct
 	/* ... */
     } *vtab;
 } ISteamUtils;
-/* Basically the all-pure-virtual ISteamClient handle is the virtual table. */
+
 typedef struct
 {
     struct {
@@ -90,7 +92,7 @@ extern const char *SteamAPI_GetSteamInstallPath(void);
 
 /**
  *
- *  Initializatino and hooking stuff.
+ *  Initialization and hooking stuff.
  *
  */
 
@@ -153,7 +155,7 @@ deinit(void)
  */
 
 static uint8_t
-toUint8(uint32_t val, uint32_t mask)
+mask32To8(uint32_t val, uint32_t mask)
 {
     switch (mask)
     {
@@ -192,16 +194,16 @@ captureScreenShot(Display *dpy, Window win, int *w, int *h)
     /* Convert to plain RGB as required by steam. */
     *h = attrs.height;
     *w = attrs.width;
-    data = (uint8_t *)malloc(*w * *h * 3);
+    data = (uint8_t *)malloc(3 * *w * *h);
 
     /* TrueColor (which we assume) has got 4 bytes per pixel. */
     /* TODO assert depth */
     for (i = 0; i < *w * *h; i++)
     {
 	uint32_t p = *(uint32_t *)(image->data + 4 * i);
-	data[3 * i + 0] = toUint8(p, image->red_mask);
-	data[3 * i + 1] = toUint8(p, image->green_mask);
-	data[3 * i + 2] = toUint8(p, image->blue_mask);
+	data[3 * i + 0] = mask32To8(p, image->red_mask);
+	data[3 * i + 1] = mask32To8(p, image->green_mask);
+	data[3 * i + 2] = mask32To8(p, image->blue_mask);
     }
     
     XDestroyImage(image);
@@ -293,6 +295,7 @@ handleRequest(Display *dpy)
     }
 }
 
+/* Grab the various handles from the interfaces. Actually userid and appid aren't needed. */
 static void
 steamSetup(void)
 {
@@ -345,7 +348,8 @@ steamSetup(void)
     iscrshot = sc->vtab->GetISteamScreenshots(sc, hsu, hsp, STEAMSCREENSHOTS_INTERFACE_VERSION);
     if (!iscrshot)
     {
-	fprintf(stderr, "ERROR: SteamScreenshots is NULL! Check interface version STEAMSCREENSHOTS_INTERFACE_VERSION0xy in libsteam_api.so.\n");
+	fprintf(stderr, "ERROR: SteamScreenshots is NULL! "
+			"Check interface version STEAMSCREENSHOTS_INTERFACE_VERSION0xy in libsteam_api.so.\n");
 	return;
     }
 
