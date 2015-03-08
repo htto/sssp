@@ -238,7 +238,7 @@ handleScreenShot(Display *dpy, Window win)
     snprintf(path, sizeof(path), "%s/userdata/%d/760/remote/%d/screenshots/%s_%05d.jpg",
 	SteamAPI_GetSteamInstallPath(), steamUserID.asComponent.accountID,
 	steamAppID, date, count);
-#ifdef DEBUG
+#if DEBUG > 2
     fprintf(stderr, "screenshot file: '%s'\n", path);
 #endif
 
@@ -272,12 +272,12 @@ filter(Display *dpy UNUSED, XEvent *event, XPointer arg UNUSED)
 		if (ke->time - t > 50)
 		{
 		    t = ke->time;
-#ifdef DEBUG
+#if DEBUG > 1
 		    fprintf(stderr, "keysym: 0x%lx\n", keysym);
 #endif
 		    return True;
 		}
-#ifdef DEBUG
+#if DEBUG > 1
 		fprintf(stderr, "keysym skipped: 0x%lx\n", keysym);
 #endif
 	    }
@@ -321,7 +321,7 @@ steamSetup(void)
 
     hsp = SteamAPI_GetHSteamPipe();
     hsu = SteamAPI_GetHSteamUser();
-#ifdef DEBUG
+#if DEBUG > 1
     fprintf(stderr, "client: %p\n", sc);
     fprintf(stderr, "hpipe: %d\n", hsp);
     fprintf(stderr, "huser: %d\n", hsu);
@@ -330,12 +330,13 @@ steamSetup(void)
     su = sc->vtab->GetISteamUser(sc, hsu, hsp, STEAMUSER_INTERFACE_VERSION);
     if (!su)
     {
-	fprintf(stderr, "ERROR: SteamUser is NULL! Check interface version SteamUser0xy in libsteam_api.so.\n");
+	fprintf(stderr, "ERROR: SteamUser is NULL! "
+			"Check interface version SteamUser0xy in libsteam_api.so.\n");
 	return;
     }
 
     steamUserID = su->vtab->GetSteamID(su);
-#ifdef DEBUG
+#if DEBUG > 1
     fprintf(stderr, "id: %llu %u\n", steamUserID.as64Bit, steamUserID.asComponent.accountID);
     fflush(stderr);
 #endif
@@ -343,11 +344,12 @@ steamSetup(void)
     sut = sc->vtab->GetISteamUtils(sc, hsp, STEAMUTILS_INTERFACE_VERSION);
     if (!sut)
     {
-	fprintf(stderr, "ERROR: SteamUtils is NULL! Check interface version SteamUtils0xy in libsteam_api.so.\n");
+	fprintf(stderr, "ERROR: SteamUtils is NULL! "
+			"Check interface version SteamUtils0xy in libsteam_api.so.\n");
 	return;
     }
     steamAppID = sut->vtab->GetAppID(sut);
-#ifdef DEBUG
+#if DEBUG > 1
     fprintf(stderr, "aid: %u\n", steamAppID);
     fflush(stderr);
 #endif
@@ -371,7 +373,7 @@ steamSetup(void)
 extern int
 XEventsQueued(Display *dpy, int mode)
 {
-#ifdef DEBUG
+#if DEBUG > 2
     fprintf(stderr, "XEventsQueued\n");
 #endif
     handleRequest(dpy);
@@ -381,7 +383,7 @@ XEventsQueued(Display *dpy, int mode)
 extern int
 XLookupString(XKeyEvent *ke, char *bufret, int bufsiz, KeySym *keysym, XComposeStatus *status_in_out)
 {
-#ifdef DEBUG
+#if DEBUG > 2
     fprintf(stderr, "XLookupString\n");
 #endif
     if (filter(ke->display, (XEvent *)ke, NULL))
@@ -394,7 +396,7 @@ XLookupString(XKeyEvent *ke, char *bufret, int bufsiz, KeySym *keysym, XComposeS
 extern int
 XPending(Display *dpy)
 {
-#ifdef DEBUG
+#if DEBUG > 2
     fprintf(stderr, "XPending\n");
 #endif
     handleRequest(dpy);
@@ -404,7 +406,12 @@ XPending(Display *dpy)
 extern Bool
 SteamAPI_Init(void)
 {
-    Bool r = _realSteamAPI_Init();
+    Bool r;
+
+#if DEBUG > 1
+    fprintf(stderr, "SteamAPI_Init\n");
+#endif
+    r = _realSteamAPI_Init();
 
     if (r)
 	steamSetup();
@@ -415,7 +422,12 @@ SteamAPI_Init(void)
 extern Bool
 SteamAPI_InitSafe(void)
 {
-    Bool r = _realSteamAPI_InitSafe();
+    Bool r;
+
+#if DEBUG > 1
+    fprintf(stderr, "SteamAPI_InitSafe\n");
+#endif
+    r = _realSteamAPI_InitSafe();
 
     if (r)
 	steamSetup();
