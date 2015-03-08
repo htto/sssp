@@ -17,6 +17,8 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 
+#define UNUSED __attribute__((unused))
+
 /**
  *
  * Steam SDK info
@@ -255,7 +257,7 @@ handleScreenShot(Display *dpy, Window win)
 
 /* Filter XEvent */
 static Bool
-filter(Display *dpy, XEvent *event, XPointer arg)
+filter(Display *dpy UNUSED, XEvent *event, XPointer arg UNUSED)
 {
     if (event->type == KeyPress /*|| event->type == KeyRelease*/)
     {
