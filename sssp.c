@@ -222,6 +222,9 @@ static void
 handleScreenShot(Display *dpy, Window win)
 {
     int w, h;
+
+    if (!steamInitialized)
+	return;
 #if 0
     /* Hand made fallback disabled in favour of Steam's screenshot writer. */
     static uint32_t count = 0;
