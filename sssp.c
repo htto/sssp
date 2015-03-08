@@ -112,6 +112,9 @@ static uint32_t steamAppID;
 static Bool steamInitialized = False;
 static ISteamScreenshots *iscrshot = NULL;
 
+extern Bool ssspRunning;
+Bool ssspRunning = False;
+
 static void *
 findHook(const char *mod, const char *name)
 {
@@ -130,9 +133,23 @@ findHook(const char *mod, const char *name)
 }
 
 /* Initialization */
-__attribute__((constructor)) void
+__attribute__((constructor)) static void
 init(void)
 {
+    fprintf(stderr, "sssp_xy.so loaded into program '%s' (%s).\n",
+		    program_invocation_short_name, program_invocation_name);
+
+    /* TODO blacklist steam* executables */
+    /* TODO don't do anything if gameoverlayrenderer.so is loaded? */
+
+    if (ssspRunning)
+    {
+	fprintf(stderr, "SSSP already loaded! Check your LD_PRELOAD.\n");
+	/* TODO don't fail? */
+	exit(1);
+    }
+
+    ssspRunning = True;
     _realXEventsQueued = (hookPFunc)findHook(NULL, "XEventsQueued");
     _realXLookupString = (hookPFunc)findHook(NULL, "XLookupString");
     _realXPending = (hookPFunc)findHook(NULL, "XPending");
