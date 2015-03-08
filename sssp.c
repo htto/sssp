@@ -115,8 +115,13 @@ static ISteamScreenshots *iscrshot = NULL;
 static void *
 findHook(const char *mod, const char *name)
 {
+    void *h = NULL;
     void *m = mod ? dlopen(mod, RTLD_NOW) : RTLD_NEXT;
-    void * h = dlsym(m, name);
+
+    if (!m)
+	fprintf(stderr, "Unable to query module %s!\n", mod);
+
+    h = m ? dlsym(m, name) : NULL;
 
     if (!h)
 	fprintf(stderr, "Unable to hook %s!\n", name);
