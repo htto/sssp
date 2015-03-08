@@ -9,6 +9,7 @@
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -135,17 +136,21 @@ init(void)
     if (!(_realXEventsQueued && _realXLookupString && _realXPending &&
 	    _realSteamAPI_Init && _realSteamAPI_InitSafe))
     {
-	fprintf(stderr, "ERROR: Unable to set up hooks. Won't work this way."
+	fprintf(stderr, "ERROR: Unable to set up hooks. Won't work this way. "
 			"Please disable this module from being LD_PRELOAD'ed.\n");
+	/* TODO don't fail? */
 	exit(1);
     }
+    fprintf(stderr, "sssp_xy.so initialized.\n");
 }
 
 /* Finalization */
-__attribute__((destructor)) void
+__attribute__((destructor)) static void
 deinit(void)
 {
     /* TODO */
+    fprintf(stderr, "sssp_xy.so being unloaded from program '%s' (%s).\n",
+		    program_invocation_short_name, program_invocation_name);
 }
 
 /**
