@@ -287,7 +287,7 @@ filter(Display *dpy UNUSED, XEvent *event, XPointer arg UNUSED)
     if (event->type == KeyPress /*|| event->type == KeyRelease*/)
     {
 	XKeyEvent *ke = (XKeyEvent *)event;
-	if (!ke->send_event && !ke->state /* modifiers */)
+	if (!ke->send_event && !(ke->state & 0xFF/* kbd modifiers */))
 	{
 	    KeySym keysym = XLookupKeysym(ke, 0);
 	    if (keysym == XK_F12)
