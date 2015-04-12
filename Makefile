@@ -14,5 +14,8 @@ sssp_32.so: sssp.c
 sssp_64.so: sssp.c
 	$(COMPILE) -m64 $< -o $@
 
+test: test.c
+	$(CC) -m32 -L. -lsteam_api $(WFLAGS) $(CFLAGS) $< -o $@
+
 clean:
 	rm sssp_??.so
