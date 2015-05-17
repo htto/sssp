@@ -21,4 +21,4 @@ test_xterm: all
 	env LD_LIBRARY_PATH=contrib/lib64/ LD_PRELOAD=./sssp_64.so xterm
 
 clean:
-	rm -f sssp_??.so test
+	rm -f sssp_??.so

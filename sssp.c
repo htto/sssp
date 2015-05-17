@@ -203,8 +203,8 @@ init(void)
     sigaction(SIGALRM, &sigAction, &oldSigAction);
     /**
      * man 2 timer_create
-     * Specifying sevp as NULL is equivalent to specifying a pointer  to  a 
-     * sigevent  structure  in  which  sigev_notify  is SIGEV_SIGNAL, sigev_signo
+     * Specifying sevp as NULL is equivalent to specifying a pointer to a
+     * sigevent structure in which sigev_notify is SIGEV_SIGNAL, sigev_signo
      * is SIGALRM, and sigev_value.sival_int is the timer ID */
     timer_create(CLOCK_MONOTONIC, NULL, &userFbTimer);
 
@@ -281,7 +281,7 @@ captureScreenShot(Display *dpy, Window win, int *w, int *h)
 	data[3 * i + 1] = mask32To8(p, image->green_mask);
 	data[3 * i + 2] = mask32To8(p, image->blue_mask);
     }
-    
+
     XDestroyImage(image);
 
     return (void *)data;
@@ -302,7 +302,7 @@ handleScreenShot(Display *dpy, Window win)
     /* User feedback */
 #if 1
     if (XGetWindowAttributes(dpy, win, &attrs) != 0)
-    { 
+    {
 	const int fbb = 2, fbh = 100, fbw = fbh * (attrs.width * 1.0 / attrs.height);
 	double s = (1.0 * fbh) / attrs.height;
 	XRenderPictFormat *fmt = XRenderFindVisualFormat(dpy, attrs.visual);
