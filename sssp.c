@@ -35,6 +35,10 @@
 #define STEAMUTILS_INTERFACE_VERSION "SteamUtils006"
 /* The screenshot interface version. */
 #define STEAMSCREENSHOTS_INTERFACE_VERSION "STEAMSCREENSHOTS_INTERFACE_VERSION002"
+/* The unified messages interface version */
+#define STEAMUNIFIEDMESSAGES_INTERFACE_VERSION "STEAMUNIFIEDMESSAGES_INTERFACE_VERSION001"
+
+#define ERESULT_OK 1
 
 /* SteamID is same as in SDK and 64 bits total */
 typedef union
@@ -64,6 +68,18 @@ typedef struct
 typedef struct
 {
     struct {
+	uint64_t (*SendMethod)(void *thiz, char *meth, void *buf, uint32_t siz, uint64_t unContext);
+	Bool (*GetMethodResponseInfo)(void *thiz, uint64_t h, uint32_t *siz, uint32_t *rc);
+	Bool (*GetMethodResponseData)(void *thiz, uint64_t h, void *buf, uint32_t siz, Bool autoRel);
+	Bool (*ReleaseMethod)(void *thiz, uint64_t h);
+	Bool (*SendNotification)(void *thiz, char *sn, void *buf, uint32_t siz);
+	/* ... */
+    } *vtab;
+} ISteamUnifiedMessages;
+
+typedef struct
+{
+    struct {
 	void *funcs1[2];
 	SteamID (*GetSteamID)(void *thiz);
 	/* ... */
@@ -88,6 +104,10 @@ typedef struct
 	ISteamUtils *(*GetISteamUtils)(void *thiz, int32_t pipe, const char *);
 	void *funcs3[8];
 	ISteamScreenshots *(*GetISteamScreenshots)(void *thiz, int32_t user, int32_t pipe, const char *);
+	void *funcs4[4];
+	// TODO #ifdef _PS3 void *funcs4ps[1]; #endif
+	void *funcs5[1];
+	ISteamUnifiedMessages *(*GetISteamUnifiedMessages)(void *thiz, int32_t user, int32_t pipe, const char *);
 	/* ... */
     } *vtab;
 } ISteamClient;
@@ -96,6 +116,8 @@ extern ISteamClient *SteamClient(void);
 extern int32_t SteamAPI_GetHSteamPipe(void);
 extern int32_t SteamAPI_GetHSteamUser(void);
 extern const char *SteamAPI_GetSteamInstallPath(void);
+
+extern void *SteamService_GetIPCServer(void);
 
 /**
  *
@@ -496,6 +518,81 @@ steamSetup(void)
 			"Check interface version STEAMSCREENSHOTS_INTERFACE_VERSION0xy in libsteam_api.so.\n");
 	return;
     }
+
+    iunimsg = sc->vtab->GetISteamUnifiedMessages(sc, hsu, hsp, STEAMUNIFIEDMESSAGES_INTERFACE_VERSION);
+    if (!iunimsg)
+    {
+	fprintf(stderr, "ERROR: SteamUnifiedMessages is NULL! "
+			"Check interface version STEAMUNIFIEDMESSAGES_INTERFACE_VERSION0xy in libsteam_api.so.\n");
+	return;
+    }
+
+#if 0
+    Bool b;
+
+#if 0
+    sleep(1);
+    b = iunimsg->vtab->SendNotification(iunimsg, "Notification.ScreenshotTaken#1", "Test", 5);
+    fprintf(stderr, "SendNotification: %d\n", b);
+    sleep(1);
+    b = iunimsg->vtab->SendNotification(iunimsg, ".Notifications_ShowMessage#1", "lalelu", 6);
+    fprintf(stderr, "SendNotification: %d\n", b);
+    sleep(1);
+    b = iunimsg->vtab->SendNotification(iunimsg, "MsgTest.NotifyServer#Notification", "lalelu", 6);
+    fprintf(stderr, "SendNotification: %d\n", b);
+    sleep(1);
+    b = iunimsg->vtab->SendNotification(iunimsg, "MsgTest.NotifyClient#Notification", "lalelu", 6);
+    fprintf(stderr, "SendNotification: %d\n", b);
+    sleep(1);
+#endif
+    sleep(1);
+    //b = iunimsg->vtab->SendNotification(iunimsg, "PlayerClient.NotifyLastPlayedTimes#1", "1234", 4);
+    b = iunimsg->vtab->SendNotification(iunimsg, "GetLastAchievementUnlocked", 0, 0);
+    fprintf(stderr, "SendNotification: %d\n", b);
+#endif
+
+#if 0
+    uint64_t i;
+    uint32_t siz, rc;
+
+    sleep(1);
+    //i = iunimsg->vtab->SendMethod(iunimsg, "Player.GetGameBadgeLevels#1", 0, 0, 0);
+    //i = iunimsg->vtab->SendMethod(iunimsg, "Player.ClientGetLastPlayedTimes#1", 0, 0, 0);
+    //i = iunimsg->vtab->SendMethod(iunimsg, "GameNotifications.GetSessionDetails#1", 0, 0, 0);
+
+    //i = iunimsg->vtab->SendMethod(iunimsg, "GameNotificationsClient.OnNotificationsRequested#1", "test", 4, 1);
+    //i = iunimsg->vtab->SendMethod(iunimsg, "PlayerClient.NotifyLastPlayedTimes#1", 0, 0, 0);
+
+    //i = iunimsg->vtab->SendMethod(iunimsg, "GameNotifications.UpdateNotificationSettings#1", 0, 0, 1);
+    //i = iunimsg->vtab->SendMethod(iunimsg, "Notification.ScreenshotTaken#1", "lala", 4, 0);
+    i = iunimsg->vtab->SendMethod(iunimsg, "GetLastAchievementUnlocked", 0, 0, 1);
+    fprintf(stderr, "SendMethod: %llu\n", i);
+    sleep(1);
+    b = iunimsg->vtab->GetMethodResponseInfo(iunimsg, i, &siz, &rc);
+    fprintf(stderr, "GetMethodResponseInfo: %d %d %d\n", b, siz, rc);
+    //if (b && rc == ERESULT_OK)
+    {
+	char a[siz];
+        b = iunimsg->vtab->GetMethodResponseData(iunimsg, i, a, siz, True);
+	fprintf(stderr, "GetMethodResponseInfo: %d < ", b);
+	uint32_t k;
+	for (k = 0; k < siz; k++)
+	{
+	    fprintf(stderr, "%d ", a[k]);
+	}
+	fprintf(stderr, "/>\n");
+    }
+
+#endif
+
+#if 0
+    hookFunc pf = (hookFunc)findHook("steamservice.so", "SteamService_GetIPCServer");
+    if (pf)
+    {
+    void *p = (void *)pf();
+    fprintf(stderr, "SteamService_GetIPCServer: %p\n", p);
+    }
+#endif
 
     steamInitialized = True;
 }
