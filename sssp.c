@@ -10,12 +10,16 @@
 #define _GNU_SOURCE
 #include <dlfcn.h>
 #include <errno.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <unistd.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
+#include <X11/extensions/Xcomposite.h>
+#include <X11/extensions/Xrender.h>
 
 #define UNUSED __attribute__((unused))
 
@@ -111,9 +115,36 @@ static SteamID steamUserID;
 static uint32_t steamAppID;
 static Bool steamInitialized = False;
 static ISteamScreenshots *iscrshot = NULL;
+static ISteamUnifiedMessages *iunimsg = NULL;
+static timer_t userFbTimer;
+static Window userFbWindow = 0;
+static Display *_dpy;
+static struct sigaction sigAction;
+static struct sigaction oldSigAction;
+static XWindowAttributes oldThumbAttrs;
+
 
 extern Bool ssspRunning;
 Bool ssspRunning = False;
+
+static void
+sigHandler(int sig, siginfo_t *info, void *c UNUSED)
+{
+    fprintf(stderr, "sigHandler\n");
+    switch (sig)
+    {
+	case SIGALRM:
+	    if (info->si_code == SI_TIMER &&
+		info->si_value.sival_ptr == userFbTimer)
+	    {
+		if (userFbWindow) XUnmapWindow(_dpy, userFbWindow);
+		return;
+	    }
+	/* Fallthrough */
+    }
+
+    oldSigAction.sa_handler(sig);
+}
 
 static void *
 findHook(const char *mod, const char *name)
@@ -165,6 +196,18 @@ init(void)
 	/* TODO don't fail? */
 	exit(1);
     }
+
+    sigAction.sa_sigaction = sigHandler;
+    sigAction.sa_flags = SA_SIGINFO;
+    sigemptyset(&sigAction.sa_mask);
+    sigaction(SIGALRM, &sigAction, &oldSigAction);
+    /**
+     * man 2 timer_create
+     * Specifying sevp as NULL is equivalent to specifying a pointer  to  a 
+     * sigevent  structure  in  which  sigev_notify  is SIGEV_SIGNAL, sigev_signo
+     * is SIGALRM, and sigev_value.sival_int is the timer ID */
+    timer_create(CLOCK_MONOTONIC, NULL, &userFbTimer);
+
     fprintf(stderr, "sssp_xy.so initialized.\n");
 }
 
@@ -175,6 +218,8 @@ deinit(void)
     /* TODO */
     fprintf(stderr, "sssp_xy.so being unloaded from program '%s' (%s).\n",
 		    program_invocation_short_name, program_invocation_name);
+
+    // timer_delete(&userFbTimer); invalid pointer?
 }
 
 /**
@@ -220,6 +265,8 @@ captureScreenShot(Display *dpy, Window win, int *w, int *h)
     }
     /* XUngrabServer(dpy); */
 
+    fprintf(stderr, "Grabbed image of size %dx%d and depth %d.\n", image->width, image->height, image->depth);
+
     /* Convert to plain RGB as required by steam. */
     *h = attrs.height;
     *w = attrs.width;
@@ -243,39 +290,102 @@ captureScreenShot(Display *dpy, Window win, int *w, int *h)
 static void
 handleScreenShot(Display *dpy, Window win)
 {
+    /* User feedback size */
     int w, h;
-
-    if (!steamInitialized)
-	return;
-#if 0
-    /* Hand made fallback disabled in favour of Steam's screenshot writer. */
-    static uint32_t count = 0;
-    char path[512];
-    char date[11];
-    const time_t t = time(NULL);
-    struct tm lt;
-    
-    localtime_r(&t, &lt);
-    strftime(date, sizeof(date), "%F", &lt);
-    count++;
-
-    /* STEAM_DIR/userdata/114244302/760/remote/49520/screenshots/2015-02-24_00002.jpg */
-    snprintf(path, sizeof(path), "%s/userdata/%d/760/remote/%d/screenshots/%s_%05d.jpg",
-	SteamAPI_GetSteamInstallPath(), steamUserID.asComponent.accountID,
-	steamAppID, date, count);
-#if DEBUG > 2
-    fprintf(stderr, "screenshot file: '%s'\n", path);
-#endif
-
-    /* TODO mkdir -p */
-#endif
+    XWindowAttributes attrs;
 
     /* Image grabbed through X11 and converted to RGB */
     void *image = captureScreenShot(dpy, win, &w, &h);
+    if (!image)
+	return;
+
+    /* User feedback */
+#if 1
+    if (XGetWindowAttributes(dpy, win, &attrs) != 0)
+    { 
+	const int fbb = 2, fbh = 100, fbw = fbh * (attrs.width * 1.0 / attrs.height);
+	double s = (1.0 * fbh) / attrs.height;
+	XRenderPictFormat *fmt = XRenderFindVisualFormat(dpy, attrs.visual);
+
+	/* Hide thumb if it's there */
+	if (userFbWindow)
+	{
+	    XUnmapWindow(dpy, userFbWindow);
+	    /* And destroy on size change */
+	    if (attrs.width != oldThumbAttrs.width || attrs.height != oldThumbAttrs.height)
+	    {
+		XDestroyWindow(dpy, userFbWindow);
+		userFbWindow = 0;
+	    }
+	}
+
+	/* (Re-)init if needed */
+	if (!userFbWindow)
+	{
+	    userFbWindow = XCreateSimpleWindow(dpy, win,
+		attrs.width - fbw - fbb - fbb, attrs.height - fbh - fbb - fbb, fbw, fbh,
+		fbb, 0x45323232, 0);
+	    oldThumbAttrs = attrs;
+	}
+
+	/* Redirect src and thumb window to offscreen */
+	XCompositeRedirectWindow(dpy, win, CompositeRedirectAutomatic);
+	XCompositeRedirectWindow(dpy, userFbWindow, CompositeRedirectAutomatic);
+	/* Save a reference to the current pixmap */
+	Pixmap pix = XCompositeNameWindowPixmap(dpy, win);
+	Picture picture = XRenderCreatePicture(dpy, pix, fmt, 0, 0);
+	/* Scale to the thumb size */
+	XTransform scale = {{{XDoubleToFixed(1), 0, 0}, {0, XDoubleToFixed(1), 0}, {0, 0, XDoubleToFixed(s)}}};
+	XRenderSetPictureTransform(dpy, picture, &scale);
+	/* Xrender target for thumb */
+	Picture pic2 = XRenderCreatePicture(dpy, userFbWindow, fmt, 0, 0);
+	XMapWindow(dpy, userFbWindow);
+
+	/* Compose into the thumb window */
+	XRenderComposite(dpy, PictOpSrc, picture, None, pic2, 0, 0, 0, 0, 0, 0, fbw, fbh);
+	/* Free */
+	XRenderFreePicture(dpy, picture);
+	XRenderFreePicture(dpy, pic2);
+
+	/* Start unmap timer */
+	_dpy = dpy;
+	const struct itimerspec tval = { { 0, 0 }, { 5, 0} };
+	timer_settime(&userFbTimer, 0, &tval, NULL);
+    }
+#endif
+
     /* Issue the RGB image directly to steam. */
-    if (image && !iscrshot->vtab->WriteScreenshot(iscrshot, image, 3 * w * h, w, h))
+    if (steamInitialized && !iscrshot->vtab->WriteScreenshot(iscrshot, image, 3 * w * h, w, h))
     {
 	fprintf(stderr, "Failed to issue screenshot to steam.\n");
+    }
+    else
+    {
+	// TODO
+	fprintf(stderr, "Steam not initialized, doing custom save.\n");
+#if 0
+	/* Hand made fallback disabled in favour of Steam's screenshot writer. */
+	static uint32_t count = 0;
+	char path[512];
+	char date[11];
+	const time_t t = time(NULL);
+	struct tm lt;
+
+	localtime_r(&t, &lt);
+	strftime(date, sizeof(date), "%F", &lt);
+	count++;
+
+	/* STEAM_DIR/userdata/accountID/760/remote/appID/screenshots/2015-02-24_00002.jpg */
+	snprintf(path, sizeof(path), "%s/userdata/%d/760/remote/%d/screenshots/%s_%05d.jpg",
+		SteamAPI_GetSteamInstallPath(), steamUserID.asComponent.accountID,
+		steamAppID, date, count);
+#if DEBUG > 2
+	fprintf(stderr, "screenshot file: '%s'\n", path);
+#endif
+
+	/* TODO mkdir -p */
+#endif
+
     }
     free(image);
 }
