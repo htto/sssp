@@ -14,11 +14,13 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 #include <unistd.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/extensions/Xcomposite.h>
+#include <X11/extensions/Xdamage.h>
 #include <X11/extensions/Xrender.h>
 
 #define UNUSED __attribute__((unused))
@@ -278,6 +280,7 @@ captureScreenShot(Display *dpy, Window win, int *w, int *h)
 
     /* XGrabServer(dpy); */
     if (XGetWindowAttributes(dpy, win, &attrs) == 0 ||
+	    /* TODO switch to XRenderCreatePicture */
 	    (image = XGetImage(dpy, win, 0, 0, attrs.width, attrs.height,
 				AllPlanes, ZPixmap)) == NULL)
     {
@@ -287,7 +290,9 @@ captureScreenShot(Display *dpy, Window win, int *w, int *h)
     }
     /* XUngrabServer(dpy); */
 
+#if DEBUG > 0
     fprintf(stderr, "Grabbed image of size %dx%d and depth %d.\n", image->width, image->height, image->depth);
+#endif
 
     /* Convert to plain RGB as required by steam. */
     *h = attrs.height;
@@ -332,14 +337,26 @@ handleScreenShot(Display *dpy, Window win)
 	/* Hide thumb if it's there */
 	if (userFbWindow)
 	{
-	    XUnmapWindow(dpy, userFbWindow);
+	    /* Issue damage notification, since we're going to capture it again right now */
+	    //XUnmapWindow(dpy, userFbWindow);
+	    XWithdrawWindow(dpy, userFbWindow, XScreenNumberOfScreen(attrs.screen));
+	    XserverRegion reg = XFixesCreateRegionFromWindow(dpy, userFbWindow, 0);
+	    XDamageAdd(dpy, win, reg);
+
 	    /* And destroy on size change */
 	    if (attrs.width != oldThumbAttrs.width || attrs.height != oldThumbAttrs.height)
 	    {
+		fprintf(stderr, "XDestroyWindow(userFbWindow)\n");
 		XDestroyWindow(dpy, userFbWindow);
 		userFbWindow = 0;
 	    }
 	}
+
+	XFlush(dpy);
+
+	/* Let unmap settle before recapture */
+	/* TODO try to find a way without sleep */
+	usleep(15000);
 
 	/* (Re-)init if needed */
 	if (!userFbWindow)
