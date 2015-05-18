@@ -1,8 +1,8 @@
-CFLAGS=-march=native -O2 -DDEBUG=0 -ggdb
+CFLAGS=-march=native -O2 -DDEBUG=2 -ggdb
 WFLAGS=-Wall -Wextra
 
-INCS=$(shell pkg-config --cflags x11 xrender xcomposite)
-LIBS=-ldl $(shell pkg-config --libs x11 xrender xcomposite) -lrt
+INCS=$(shell pkg-config --cflags x11 xcomposite xdamage xfixes xrender)
+LIBS=-ldl $(shell pkg-config --libs x11 xcomposite xdamage xfixes xrender) -lrt
 
 COMPILE=$(CC) -fPIC -shared $(INCS) $(LIBS) $(WFLAGS) $(CFLAGS)
 

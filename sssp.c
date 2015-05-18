@@ -140,34 +140,25 @@ static uint32_t steamAppID;
 static Bool steamInitialized = False;
 static ISteamScreenshots *iscrshot = NULL;
 static ISteamUnifiedMessages *iunimsg = NULL;
-static timer_t userFbTimer;
+
+timer_t userFbTimer;
 static Window userFbWindow = 0;
 static Display *_dpy;
-static struct sigaction sigAction;
-static struct sigaction oldSigAction;
 static XWindowAttributes oldThumbAttrs;
-
 
 extern Bool ssspRunning;
 Bool ssspRunning = False;
 
 static void
-sigHandler(int sig, siginfo_t *info, void *c UNUSED)
+userFbTimerHandler(union sigval val)
 {
-    fprintf(stderr, "sigHandler\n");
-    switch (sig)
+    if (userFbWindow)
     {
-	case SIGALRM:
-	    if (info->si_code == SI_TIMER &&
-		info->si_value.sival_ptr == userFbTimer)
-	    {
-		if (userFbWindow) XUnmapWindow(_dpy, userFbWindow);
-		return;
-	    }
-	/* Fallthrough */
+	/* Disappears on next repaint of parent */
+	XUnmapWindow(_dpy, userFbWindow);
+	/* Try to trigger repaint by flushing events */
+	XFlush(_dpy);
     }
-
-    oldSigAction.sa_handler(sig);
 }
 
 static void *
@@ -221,16 +212,17 @@ init(void)
 	exit(1);
     }
 
-    sigAction.sa_sigaction = sigHandler;
-    sigAction.sa_flags = SA_SIGINFO;
-    sigemptyset(&sigAction.sa_mask);
-    sigaction(SIGALRM, &sigAction, &oldSigAction);
-    /**
-     * man 2 timer_create
-     * Specifying sevp as NULL is equivalent to specifying a pointer to a
-     * sigevent structure in which sigev_notify is SIGEV_SIGNAL, sigev_signo
-     * is SIGALRM, and sigev_value.sival_int is the timer ID */
-    timer_create(CLOCK_MONOTONIC, NULL, &userFbTimer);
+    struct sigevent sevp;
+    sevp.sigev_notify = SIGEV_THREAD;
+    sevp.sigev_value.sival_ptr = &userFbTimer;
+    sevp.sigev_notify_function = userFbTimerHandler;
+    sevp.sigev_notify_attributes = NULL;
+    int rc = timer_create(CLOCK_MONOTONIC, &sevp, &userFbTimer);
+    if (rc)
+	perror("timer_create()");
+
+    /* Init thread support */
+    XInitThreads();
 
     fprintf(stderr, "sssp_xy.so initialized.\n");
 }
@@ -243,7 +235,7 @@ deinit(void)
     fprintf(stderr, "sssp_xy.so being unloaded from program '%s' (%s).\n",
 		    program_invocation_short_name, program_invocation_name);
 
-    // timer_delete(&userFbTimer); invalid pointer?
+    timer_delete(userFbTimer);
 }
 
 /**
@@ -338,10 +330,13 @@ handleScreenShot(Display *dpy, Window win)
 	if (userFbWindow)
 	{
 	    /* Issue damage notification, since we're going to capture it again right now */
-	    //XUnmapWindow(dpy, userFbWindow);
-	    XWithdrawWindow(dpy, userFbWindow, XScreenNumberOfScreen(attrs.screen));
+	    XUnmapWindow(dpy, userFbWindow);
+	    #if 0
 	    XserverRegion reg = XFixesCreateRegionFromWindow(dpy, userFbWindow, 0);
 	    XDamageAdd(dpy, win, reg);
+	    XDamageAdd(dpy, userFbWindow, reg);
+	    XFixesDestroyRegion(dpy, reg);
+	    #endif
 
 	    /* And destroy on size change */
 	    if (attrs.width != oldThumbAttrs.width || attrs.height != oldThumbAttrs.height)
@@ -355,7 +350,8 @@ handleScreenShot(Display *dpy, Window win)
 	XFlush(dpy);
 
 	/* Let unmap settle before recapture */
-	/* TODO try to find a way without sleep */
+	/* TODO try to find a way without sleep 
+	 * possibly by arming a timer and returning to the caller right now */
 	usleep(15000);
 
 	/* (Re-)init if needed */
@@ -376,6 +372,7 @@ handleScreenShot(Display *dpy, Window win)
 	/* Scale to the thumb size */
 	XTransform scale = {{{XDoubleToFixed(1), 0, 0}, {0, XDoubleToFixed(1), 0}, {0, 0, XDoubleToFixed(s)}}};
 	XRenderSetPictureTransform(dpy, picture, &scale);
+
 	/* Xrender target for thumb */
 	Picture pic2 = XRenderCreatePicture(dpy, userFbWindow, fmt, 0, 0);
 	XMapWindow(dpy, userFbWindow);
@@ -385,11 +382,19 @@ handleScreenShot(Display *dpy, Window win)
 	/* Free */
 	XRenderFreePicture(dpy, picture);
 	XRenderFreePicture(dpy, pic2);
+	XCompositeUnredirectWindow(dpy, win, CompositeRedirectAutomatic);
+	XCompositeUnredirectWindow(dpy, userFbWindow, CompositeRedirectAutomatic);
 
 	/* Start unmap timer */
 	_dpy = dpy;
-	const struct itimerspec tval = { { 0, 0 }, { 5, 0} };
-	timer_settime(&userFbTimer, 0, &tval, NULL);
+	struct itimerspec *tval = malloc(sizeof *tval);
+	tval->it_value.tv_sec = 5;
+	tval->it_value.tv_nsec = 0;
+	tval->it_interval.tv_sec = 0;
+	tval->it_interval.tv_nsec = 0;
+	int rc = timer_settime(userFbTimer, 0, tval, NULL);
+	if (rc)
+	    perror("timer_settime()");
     }
 #endif
 
