@@ -143,6 +143,10 @@ static ISteamUnifiedMessages *g_steamIUnifiedMessage = NULL;
 /* X11 */
 static Display *g_xDisplay;
 
+/* Screenshot handling */
+timer_t g_screenshotTimer;
+static Window g_shotWin = 0;
+
 /* User feedback (aka thumb view) */
 timer_t g_userFbTimer;
 static Window g_userFbWin = 0;
@@ -157,6 +161,16 @@ Bool ssspRunning = False;
  * Timer handlers.
  *
  */
+
+static void doScreenShot(Display *dpy, Window win);
+static void screenshotTimerHandler(union sigval val UNUSED)
+{
+	if (g_shotWin)
+	{
+		// Issue capturing.
+		doScreenShot(g_xDisplay, g_shotWin);
+	}
+}
 
 static void userFbTimerHandler(union sigval val UNUSED)
 {
@@ -231,7 +245,13 @@ __attribute__((constructor)) static void init(void)
 	sevp.sigev_notify_attributes = NULL;
 	int rc = timer_create(CLOCK_MONOTONIC, &sevp, &g_userFbTimer);
 	if (rc)
-		perror("timer_create()");
+		perror("timer_create(g_userFbTimer)");
+
+	sevp.sigev_notify_function = screenshotTimerHandler;
+	sevp.sigev_notify_attributes = NULL;
+	timer_create(CLOCK_MONOTONIC, &sevp, &g_screenshotTimer);
+	if (rc)
+		perror("timer_create(g_screenshotTimer)");
 
 	/* Init thread support */
 	XInitThreads();
@@ -317,9 +337,32 @@ static void *captureScreenShot(Display *dpy, Window win, int *w, int *h)
 
 static void handleScreenShot(Display *dpy, Window win)
 {
+	fprintf(stderr, "handleScreenShot\n");
+	g_xDisplay = dpy;
+	g_shotWin = win;
+
+	struct itimerspec tval;
+	tval.it_value.tv_sec = 0;
+	tval.it_value.tv_nsec = 10000;
+	tval.it_interval.tv_sec = 0;
+	tval.it_interval.tv_nsec = 0;
+	int rc = timer_settime(g_screenshotTimer, 0, &tval, NULL);
+	if (rc)
+		perror("timer_settime(g_screenshotTimer)");
+}
+
+static void doScreenShot(Display *dpy, Window win)
+{
 	/* User feedback size */
 	int w, h;
 	XWindowAttributes attrs;
+	fprintf(stderr, "doScreenShot\n");
+
+	if (g_userFbWin)
+	{
+		/* Hide feedback window */
+		XUnmapWindow(dpy, g_userFbWin);
+	}
 
 	/* Image grabbed through X11 and converted to RGB */
 	void *image = captureScreenShot(dpy, win, &w, &h);
@@ -337,9 +380,8 @@ static void handleScreenShot(Display *dpy, Window win)
 		/* Hide thumb if it's there */
 		if (g_userFbWin)
 		{
-			/* Issue damage notification, since we're going to capture it again right now */
-			XUnmapWindow(dpy, g_userFbWin);
 #if 0
+			/* Issue damage notification, since we're going to capture it again right now */
 			XserverRegion reg = XFixesCreateRegionFromWindow(dpy, g_userFbWin, 0);
 			XDamageAdd(dpy, win, reg);
 			XDamageAdd(dpy, g_userFbWin, reg);
@@ -356,11 +398,6 @@ static void handleScreenShot(Display *dpy, Window win)
 		}
 
 		XFlush(dpy);
-
-		/* Let unmap settle before recapture */
-		/* TODO try to find a way without sleep 
-		 * possibly by arming a timer and returning to the caller right now */
-		usleep(15000);
 
 		/* (Re-)init if needed */
 		if (!g_userFbWin)
@@ -395,14 +432,14 @@ static void handleScreenShot(Display *dpy, Window win)
 
 		/* Start unmap timer */
 		g_xDisplay = dpy;
-		struct itimerspec *tval = malloc(sizeof *tval);
-		tval->it_value.tv_sec = 5;
-		tval->it_value.tv_nsec = 0;
-		tval->it_interval.tv_sec = 0;
-		tval->it_interval.tv_nsec = 0;
-		int rc = timer_settime(g_userFbTimer, 0, tval, NULL);
+		struct itimerspec tval;
+		tval.it_value.tv_sec = 5;
+		tval.it_value.tv_nsec = 0;
+		tval.it_interval.tv_sec = 0;
+		tval.it_interval.tv_nsec = 0;
+		int rc = timer_settime(g_userFbTimer, 0, &tval, NULL);
 		if (rc)
-			perror("timer_settime()");
+			perror("timer_settime(g_userFbTimer)");
 	}
 #endif
 
