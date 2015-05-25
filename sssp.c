@@ -117,51 +117,63 @@ typedef struct
 	} *vtab;
 } ISteamClient;
 
+/* Steam functions in libsteam_api */
 extern ISteamClient *SteamClient(void);
 extern int32_t SteamAPI_GetHSteamPipe(void);
 extern int32_t SteamAPI_GetHSteamUser(void);
 extern const char *SteamAPI_GetSteamInstallPath(void);
-
 extern void *SteamService_GetIPCServer(void);
+
+/* Hooks */
+typedef int (*hookFunc)(void);
+typedef int (*hookPFunc)(void *, ...);
+hookFunc g_realSteamAPI_Init;
+hookFunc g_realSteamAPI_InitSafe;
+hookPFunc g_realXEventsQueued;
+hookPFunc g_realXLookupString;
+hookPFunc g_realXPending;
+
+/* Steam variables */
+static SteamID g_steamUserID;
+static uint32_t g_steamAppID;
+static Bool g_steamInitialized = False;
+static ISteamScreenshots *g_steamIScreenshot = NULL;
+static ISteamUnifiedMessages *g_steamIUnifiedMessage = NULL;
+
+/* X11 */
+static Display *g_xDisplay;
+
+/* User feedback (aka thumb view) */
+timer_t g_userFbTimer;
+static Window g_userFbWin = 0;
+static XWindowAttributes g_oldFbAttrs;
+
+/* Internal duplicate loading check */
+extern Bool ssspRunning;
+Bool ssspRunning = False;
+
+/**
+ *
+ * Timer handlers.
+ *
+ */
+
+static void userFbTimerHandler(union sigval val UNUSED)
+{
+	if (g_userFbWin)
+	{
+		/* Disappears on next repaint of parent */
+		XUnmapWindow(g_xDisplay, g_userFbWin);
+		/* Try to trigger repaint by flushing events */
+		XFlush(g_xDisplay);
+	}
+}
 
 /**
  *
  * Initialization and hooking stuff.
  *
  */
-
-typedef int (*hookFunc)(void);
-typedef int (*hookPFunc)(void *, ...);
-hookFunc _realSteamAPI_Init;
-hookFunc _realSteamAPI_InitSafe;
-hookPFunc _realXEventsQueued;
-hookPFunc _realXLookupString;
-hookPFunc _realXPending;
-
-static SteamID steamUserID;
-static uint32_t steamAppID;
-static Bool steamInitialized = False;
-static ISteamScreenshots *iscrshot = NULL;
-static ISteamUnifiedMessages *iunimsg = NULL;
-
-timer_t userFbTimer;
-static Window userFbWindow = 0;
-static Display *_dpy;
-static XWindowAttributes oldThumbAttrs;
-
-extern Bool ssspRunning;
-Bool ssspRunning = False;
-
-static void userFbTimerHandler(union sigval val UNUSED)
-{
-	if (userFbWindow)
-	{
-		/* Disappears on next repaint of parent */
-		XUnmapWindow(_dpy, userFbWindow);
-		/* Try to trigger repaint by flushing events */
-		XFlush(_dpy);
-	}
-}
 
 static void *findHook(const char *mod, const char *name)
 {
@@ -196,15 +208,15 @@ __attribute__((constructor)) static void init(void)
 	}
 
 	ssspRunning = True;
-	_realXEventsQueued = (hookPFunc)findHook(NULL, "XEventsQueued");
-	_realXLookupString = (hookPFunc)findHook(NULL, "XLookupString");
-	_realXPending = (hookPFunc)findHook(NULL, "XPending");
+	g_realXEventsQueued = (hookPFunc)findHook(NULL, "XEventsQueued");
+	g_realXLookupString = (hookPFunc)findHook(NULL, "XLookupString");
+	g_realXPending = (hookPFunc)findHook(NULL, "XPending");
 	/* We need symbols from libsteam_api, so require it to be loaded. */
-	_realSteamAPI_Init = (hookFunc)findHook("libsteam_api.so", "SteamAPI_Init");
-	_realSteamAPI_InitSafe = (hookFunc)findHook("libsteam_api.so", "SteamAPI_InitSafe");
+	g_realSteamAPI_Init = (hookFunc)findHook("libsteam_api.so", "SteamAPI_Init");
+	g_realSteamAPI_InitSafe = (hookFunc)findHook("libsteam_api.so", "SteamAPI_InitSafe");
 
-	if (!(_realXEventsQueued && _realXLookupString && _realXPending &&
-				_realSteamAPI_Init && _realSteamAPI_InitSafe))
+	if (!(g_realXEventsQueued && g_realXLookupString && g_realXPending &&
+				g_realSteamAPI_Init && g_realSteamAPI_InitSafe))
 	{
 		fprintf(stderr, "ERROR: Unable to set up hooks. Won't work this way. "
 				"Please disable this module from being LD_PRELOAD'ed.\n");
@@ -214,10 +226,10 @@ __attribute__((constructor)) static void init(void)
 
 	struct sigevent sevp;
 	sevp.sigev_notify = SIGEV_THREAD;
-	sevp.sigev_value.sival_ptr = &userFbTimer;
+	sevp.sigev_value.sival_ptr = &g_userFbTimer;
 	sevp.sigev_notify_function = userFbTimerHandler;
 	sevp.sigev_notify_attributes = NULL;
-	int rc = timer_create(CLOCK_MONOTONIC, &sevp, &userFbTimer);
+	int rc = timer_create(CLOCK_MONOTONIC, &sevp, &g_userFbTimer);
 	if (rc)
 		perror("timer_create()");
 
@@ -234,7 +246,7 @@ __attribute__((destructor)) static void deinit(void)
 	fprintf(stderr, "sssp_xy.so being unloaded from program '%s' (%s).\n",
 			program_invocation_short_name, program_invocation_name);
 
-	timer_delete(userFbTimer);
+	timer_delete(g_userFbTimer);
 }
 
 /**
@@ -323,23 +335,23 @@ static void handleScreenShot(Display *dpy, Window win)
 		XRenderPictFormat *fmt = XRenderFindVisualFormat(dpy, attrs.visual);
 
 		/* Hide thumb if it's there */
-		if (userFbWindow)
+		if (g_userFbWin)
 		{
 			/* Issue damage notification, since we're going to capture it again right now */
-			XUnmapWindow(dpy, userFbWindow);
+			XUnmapWindow(dpy, g_userFbWin);
 #if 0
-			XserverRegion reg = XFixesCreateRegionFromWindow(dpy, userFbWindow, 0);
+			XserverRegion reg = XFixesCreateRegionFromWindow(dpy, g_userFbWin, 0);
 			XDamageAdd(dpy, win, reg);
-			XDamageAdd(dpy, userFbWindow, reg);
+			XDamageAdd(dpy, g_userFbWin, reg);
 			XFixesDestroyRegion(dpy, reg);
 #endif
 
 			/* And destroy on size change */
-			if (attrs.width != oldThumbAttrs.width || attrs.height != oldThumbAttrs.height)
+			if (attrs.width != g_oldFbAttrs.width || attrs.height != g_oldFbAttrs.height)
 			{
-				fprintf(stderr, "XDestroyWindow(userFbWindow)\n");
-				XDestroyWindow(dpy, userFbWindow);
-				userFbWindow = 0;
+				fprintf(stderr, "XDestroyWindow(g_userFbWin)\n");
+				XDestroyWindow(dpy, g_userFbWin);
+				g_userFbWin = 0;
 			}
 		}
 
@@ -351,17 +363,17 @@ static void handleScreenShot(Display *dpy, Window win)
 		usleep(15000);
 
 		/* (Re-)init if needed */
-		if (!userFbWindow)
+		if (!g_userFbWin)
 		{
-			userFbWindow = XCreateSimpleWindow(dpy, win,
+			g_userFbWin = XCreateSimpleWindow(dpy, win,
 					attrs.width - fbw - fbb - fbb, attrs.height - fbh - fbb - fbb, fbw, fbh,
 					fbb, 0x45323232, 0);
-			oldThumbAttrs = attrs;
+			g_oldFbAttrs = attrs;
 		}
 
 		/* Redirect src and thumb window to offscreen */
 		XCompositeRedirectWindow(dpy, win, CompositeRedirectAutomatic);
-		XCompositeRedirectWindow(dpy, userFbWindow, CompositeRedirectAutomatic);
+		XCompositeRedirectWindow(dpy, g_userFbWin, CompositeRedirectAutomatic);
 		/* Save a reference to the current pixmap */
 		Pixmap pix = XCompositeNameWindowPixmap(dpy, win);
 		Picture picture = XRenderCreatePicture(dpy, pix, fmt, 0, 0);
@@ -370,8 +382,8 @@ static void handleScreenShot(Display *dpy, Window win)
 		XRenderSetPictureTransform(dpy, picture, &scale);
 
 		/* Xrender target for thumb */
-		Picture pic2 = XRenderCreatePicture(dpy, userFbWindow, fmt, 0, 0);
-		XMapWindow(dpy, userFbWindow);
+		Picture pic2 = XRenderCreatePicture(dpy, g_userFbWin, fmt, 0, 0);
+		XMapWindow(dpy, g_userFbWin);
 
 		/* Compose into the thumb window */
 		XRenderComposite(dpy, PictOpSrc, picture, None, pic2, 0, 0, 0, 0, 0, 0, fbw, fbh);
@@ -379,23 +391,23 @@ static void handleScreenShot(Display *dpy, Window win)
 		XRenderFreePicture(dpy, picture);
 		XRenderFreePicture(dpy, pic2);
 		XCompositeUnredirectWindow(dpy, win, CompositeRedirectAutomatic);
-		XCompositeUnredirectWindow(dpy, userFbWindow, CompositeRedirectAutomatic);
+		XCompositeUnredirectWindow(dpy, g_userFbWin, CompositeRedirectAutomatic);
 
 		/* Start unmap timer */
-		_dpy = dpy;
+		g_xDisplay = dpy;
 		struct itimerspec *tval = malloc(sizeof *tval);
 		tval->it_value.tv_sec = 5;
 		tval->it_value.tv_nsec = 0;
 		tval->it_interval.tv_sec = 0;
 		tval->it_interval.tv_nsec = 0;
-		int rc = timer_settime(userFbTimer, 0, tval, NULL);
+		int rc = timer_settime(g_userFbTimer, 0, tval, NULL);
 		if (rc)
 			perror("timer_settime()");
 	}
 #endif
 
 	/* Issue the RGB image directly to steam. */
-	if (steamInitialized && !iscrshot->vtab->WriteScreenshot(iscrshot, image, 3 * w * h, w, h))
+	if (g_steamInitialized && !g_steamIScreenshot->vtab->WriteScreenshot(g_steamIScreenshot, image, 3 * w * h, w, h))
 	{
 		fprintf(stderr, "Failed to issue screenshot to steam.\n");
 	}
@@ -417,8 +429,8 @@ static void handleScreenShot(Display *dpy, Window win)
 
 		/* STEAM_DIR/userdata/accountID/760/remote/appID/screenshots/2015-02-24_00002.jpg */
 		snprintf(path, sizeof(path), "%s/userdata/%d/760/remote/%d/screenshots/%s_%05d.jpg",
-				SteamAPI_GetSteamInstallPath(), steamUserID.asComponent.accountID,
-				steamAppID, date, count);
+				SteamAPI_GetSteamInstallPath(), g_steamUserID.asComponent.accountID,
+				g_steamAppID, date, count);
 #if DEBUG > 2
 		fprintf(stderr, "screenshot file: '%s'\n", path);
 #endif
@@ -465,7 +477,7 @@ static void handleRequest(Display *dpy)
 {
 	XEvent e;
 
-	if (!steamInitialized)
+	if (!g_steamInitialized)
 		return;
 
 	/* TODO reduce eventqueue search */
@@ -506,9 +518,9 @@ static void steamSetup(void)
 		return;
 	}
 
-	steamUserID = su->vtab->GetSteamID(su);
+	g_steamUserID = su->vtab->GetSteamID(su);
 #if DEBUG > 1
-	fprintf(stderr, "id: %llu %u\n", steamUserID.as64Bit, steamUserID.asComponent.accountID);
+	fprintf(stderr, "id: %llu %u\n", g_steamUserID.as64Bit, g_steamUserID.asComponent.accountID);
 	fflush(stderr);
 #endif
 
@@ -518,21 +530,21 @@ static void steamSetup(void)
 		fprintf(stderr, ISTEAMERROR(SteamUtils, STEAMUTILS_INTERFACE_VERSION));
 		return;
 	}
-	steamAppID = sut->vtab->GetAppID(sut);
+	g_steamAppID = sut->vtab->GetAppID(sut);
 #if DEBUG > 1
-	fprintf(stderr, "aid: %u\n", steamAppID);
+	fprintf(stderr, "aid: %u\n", g_steamAppID);
 	fflush(stderr);
 #endif
 
-	iscrshot = sc->vtab->GetISteamScreenshots(sc, hsu, hsp, STEAMSCREENSHOTS_INTERFACE_VERSION);
-	if (!iscrshot)
+	g_steamIScreenshot = sc->vtab->GetISteamScreenshots(sc, hsu, hsp, STEAMSCREENSHOTS_INTERFACE_VERSION);
+	if (!g_steamIScreenshot)
 	{
 		fprintf(stderr, ISTEAMERROR(SteamScreenshots, STEAMSCREENSHOTS_INTERFACE_VERSION));
 		return;
 	}
 
-	iunimsg = sc->vtab->GetISteamUnifiedMessages(sc, hsu, hsp, STEAMUNIFIEDMESSAGES_INTERFACE_VERSION);
-	if (!iunimsg)
+	g_steamIUnifiedMessage = sc->vtab->GetISteamUnifiedMessages(sc, hsu, hsp, STEAMUNIFIEDMESSAGES_INTERFACE_VERSION);
+	if (!g_steamIUnifiedMessage)
 	{
 		fprintf(stderr, ISTEAMERROR(SteamUnifiedMessages, STEAMUNIFIEDMESSAGES_INTERFACE_VERSION));
 		return;
@@ -543,22 +555,22 @@ static void steamSetup(void)
 
 #if 0
 	sleep(1);
-	b = iunimsg->vtab->SendNotification(iunimsg, "Notification.ScreenshotTaken#1", "Test", 5);
+	b = g_steamIUnifiedMessage->vtab->SendNotification(g_steamIUnifiedMessage, "Notification.ScreenshotTaken#1", "Test", 5);
 	fprintf(stderr, "SendNotification: %d\n", b);
 	sleep(1);
-	b = iunimsg->vtab->SendNotification(iunimsg, ".Notifications_ShowMessage#1", "lalelu", 6);
+	b = g_steamIUnifiedMessage->vtab->SendNotification(g_steamIUnifiedMessage, ".Notifications_ShowMessage#1", "lalelu", 6);
 	fprintf(stderr, "SendNotification: %d\n", b);
 	sleep(1);
-	b = iunimsg->vtab->SendNotification(iunimsg, "MsgTest.NotifyServer#Notification", "lalelu", 6);
+	b = g_steamIUnifiedMessage->vtab->SendNotification(g_steamIUnifiedMessage, "MsgTest.NotifyServer#Notification", "lalelu", 6);
 	fprintf(stderr, "SendNotification: %d\n", b);
 	sleep(1);
-	b = iunimsg->vtab->SendNotification(iunimsg, "MsgTest.NotifyClient#Notification", "lalelu", 6);
+	b = g_steamIUnifiedMessage->vtab->SendNotification(g_steamIUnifiedMessage, "MsgTest.NotifyClient#Notification", "lalelu", 6);
 	fprintf(stderr, "SendNotification: %d\n", b);
 	sleep(1);
 #endif
 	sleep(1);
-	//b = iunimsg->vtab->SendNotification(iunimsg, "PlayerClient.NotifyLastPlayedTimes#1", "1234", 4);
-	b = iunimsg->vtab->SendNotification(iunimsg, "GetLastAchievementUnlocked", 0, 0);
+	//b = g_steamIUnifiedMessage->vtab->SendNotification(g_steamIUnifiedMessage, "PlayerClient.NotifyLastPlayedTimes#1", "1234", 4);
+	b = g_steamIUnifiedMessage->vtab->SendNotification(g_steamIUnifiedMessage, "GetLastAchievementUnlocked", 0, 0);
 	fprintf(stderr, "SendNotification: %d\n", b);
 #endif
 
@@ -567,24 +579,24 @@ static void steamSetup(void)
 	uint32_t siz, rc;
 
 	sleep(1);
-	//i = iunimsg->vtab->SendMethod(iunimsg, "Player.GetGameBadgeLevels#1", 0, 0, 0);
-	//i = iunimsg->vtab->SendMethod(iunimsg, "Player.ClientGetLastPlayedTimes#1", 0, 0, 0);
-	//i = iunimsg->vtab->SendMethod(iunimsg, "GameNotifications.GetSessionDetails#1", 0, 0, 0);
+	//i = g_steamIUnifiedMessage->vtab->SendMethod(g_steamIUnifiedMessage, "Player.GetGameBadgeLevels#1", 0, 0, 0);
+	//i = g_steamIUnifiedMessage->vtab->SendMethod(g_steamIUnifiedMessage, "Player.ClientGetLastPlayedTimes#1", 0, 0, 0);
+	//i = g_steamIUnifiedMessage->vtab->SendMethod(g_steamIUnifiedMessage, "GameNotifications.GetSessionDetails#1", 0, 0, 0);
 
-	//i = iunimsg->vtab->SendMethod(iunimsg, "GameNotificationsClient.OnNotificationsRequested#1", "test", 4, 1);
-	//i = iunimsg->vtab->SendMethod(iunimsg, "PlayerClient.NotifyLastPlayedTimes#1", 0, 0, 0);
+	//i = g_steamIUnifiedMessage->vtab->SendMethod(g_steamIUnifiedMessage, "GameNotificationsClient.OnNotificationsRequested#1", "test", 4, 1);
+	//i = g_steamIUnifiedMessage->vtab->SendMethod(g_steamIUnifiedMessage, "PlayerClient.NotifyLastPlayedTimes#1", 0, 0, 0);
 
-	//i = iunimsg->vtab->SendMethod(iunimsg, "GameNotifications.UpdateNotificationSettings#1", 0, 0, 1);
-	//i = iunimsg->vtab->SendMethod(iunimsg, "Notification.ScreenshotTaken#1", "lala", 4, 0);
-	i = iunimsg->vtab->SendMethod(iunimsg, "GetLastAchievementUnlocked", 0, 0, 1);
+	//i = g_steamIUnifiedMessage->vtab->SendMethod(g_steamIUnifiedMessage, "GameNotifications.UpdateNotificationSettings#1", 0, 0, 1);
+	//i = g_steamIUnifiedMessage->vtab->SendMethod(g_steamIUnifiedMessage, "Notification.ScreenshotTaken#1", "lala", 4, 0);
+	i = g_steamIUnifiedMessage->vtab->SendMethod(g_steamIUnifiedMessage, "GetLastAchievementUnlocked", 0, 0, 1);
 	fprintf(stderr, "SendMethod: %llu\n", i);
 	sleep(1);
-	b = iunimsg->vtab->GetMethodResponseInfo(iunimsg, i, &siz, &rc);
+	b = g_steamIUnifiedMessage->vtab->GetMethodResponseInfo(g_steamIUnifiedMessage, i, &siz, &rc);
 	fprintf(stderr, "GetMethodResponseInfo: %d %d %d\n", b, siz, rc);
 	//if (b && rc == ERESULT_OK)
 	{
 		char a[siz];
-		b = iunimsg->vtab->GetMethodResponseData(iunimsg, i, a, siz, True);
+		b = g_steamIUnifiedMessage->vtab->GetMethodResponseData(g_steamIUnifiedMessage, i, a, siz, True);
 		fprintf(stderr, "GetMethodResponseInfo: %d < ", b);
 		uint32_t k;
 		for (k = 0; k < siz; k++)
@@ -605,7 +617,7 @@ static void steamSetup(void)
 	}
 #endif
 
-	steamInitialized = True;
+	g_steamInitialized = True;
 }
 
 /**
@@ -619,7 +631,7 @@ extern int XEventsQueued(Display *dpy, int mode)
 	fprintf(stderr, "XEventsQueued\n");
 #endif
 	handleRequest(dpy);
-	return _realXEventsQueued(dpy, mode);
+	return g_realXEventsQueued(dpy, mode);
 }
 
 extern int XLookupString(XKeyEvent *ke, char *bufret, int bufsiz,
@@ -632,7 +644,7 @@ extern int XLookupString(XKeyEvent *ke, char *bufret, int bufsiz,
 	{
 		handleScreenShot(ke->display, ke->window);
 	}
-	return _realXLookupString(ke, bufret, bufsiz, keysym, status_in_out);
+	return g_realXLookupString(ke, bufret, bufsiz, keysym, status_in_out);
 }
 
 extern int XPending(Display *dpy)
@@ -641,7 +653,7 @@ extern int XPending(Display *dpy)
 	fprintf(stderr, "XPending\n");
 #endif
 	handleRequest(dpy);
-	return _realXPending(dpy);
+	return g_realXPending(dpy);
 }
 
 extern Bool SteamAPI_Init(void)
@@ -651,7 +663,7 @@ extern Bool SteamAPI_Init(void)
 #if DEBUG > 1
 	fprintf(stderr, "SteamAPI_Init\n");
 #endif
-	r = _realSteamAPI_Init();
+	r = g_realSteamAPI_Init();
 
 	if (r)
 		steamSetup();
@@ -666,7 +678,7 @@ extern Bool SteamAPI_InitSafe(void)
 #if DEBUG > 1
 	fprintf(stderr, "SteamAPI_InitSafe\n");
 #endif
-	r = _realSteamAPI_InitSafe();
+	r = g_realSteamAPI_InitSafe();
 
 	if (r)
 		steamSetup();
