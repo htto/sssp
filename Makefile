@@ -14,8 +14,11 @@ sssp_32.so: sssp.c
 sssp_64.so: sssp.c
 	$(COMPILE) -m64 $< -o $@
 
-test: test.c
-	$(CC) -m32 -L. -lsteam_api $(WFLAGS) $(CFLAGS) $< -o $@
+test: test.c sssp_32.so
+	$(CC) -m32 -Lcontrib/lib32 -lsteam_api $(WFLAGS) $(CFLAGS) $< -o $@
+
+test_simple: test
+	env LD_LIBRARY_PATH=contrib/lib32/ LD_PRELOAD=./sssp_32.so ./test
 
 test_glxgears: all
 	env LD_LIBRARY_PATH=contrib/lib64/ LD_PRELOAD=./sssp_64.so glxgears -geometry 1000x700

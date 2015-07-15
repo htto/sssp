@@ -17,7 +17,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-#include <X11/Xlib.h>
+#include <X11/XKBlib.h>
 #include <X11/Xutil.h>
 #include <X11/extensions/Xcomposite.h>
 #include <X11/extensions/Xdamage.h>
@@ -126,11 +126,15 @@ extern void *SteamService_GetIPCServer(void);
 
 /* Hooks */
 typedef int (*hookFunc)(void);
+typedef int (*hookCPFunc)(const void *, ...);
 typedef int (*hookPFunc)(void *, ...);
+typedef void (*hookVPFunc)(void *, ...);
+typedef void *(*hookPCPFunc)(const void *, ...);
 hookFunc g_realSteamAPI_Init;
 hookFunc g_realSteamAPI_InitSafe;
 hookPFunc g_realXEventsQueued;
 hookPFunc g_realXLookupString;
+hookPCPFunc g_realXOpenDisplay;
 hookPFunc g_realXPending;
 
 /* Steam variables */
@@ -142,6 +146,8 @@ static ISteamUnifiedMessages *g_steamIUnifiedMessage = NULL;
 
 /* X11 */
 static Display *g_xDisplay;
+static KeyCode g_xKeyCodeF11;
+static KeyCode g_xKeyCodeF12;
 
 /* Screenshot handling */
 timer_t g_screenshotTimer;
@@ -223,6 +229,7 @@ __attribute__((constructor)) static void init(void)
 
 	ssspRunning = True;
 	g_realXEventsQueued = (hookPFunc)findHook(NULL, "XEventsQueued");
+	g_realXOpenDisplay = (hookPCPFunc)findHook(NULL, "XOpenDisplay");
 	g_realXLookupString = (hookPFunc)findHook(NULL, "XLookupString");
 	g_realXPending = (hookPFunc)findHook(NULL, "XPending");
 	/* We need symbols from libsteam_api, so require it to be loaded. */
@@ -253,7 +260,7 @@ __attribute__((constructor)) static void init(void)
 	if (rc)
 		perror("timer_create(g_screenshotTimer)");
 
-	/* Init thread support */
+	/* Init X11 thread support */
 	XInitThreads();
 
 	fprintf(stderr, "sssp_xy.so initialized.\n");
@@ -482,32 +489,53 @@ static void doScreenShot(Display *dpy, Window win)
 /* Filter XEvent */
 static Bool filter(Display *dpy UNUSED, XEvent *event, XPointer arg UNUSED)
 {
+	XKeyEvent *ke = NULL;
+	Bool rc = False;
+	static Time t = 0;
+
+#if DEBUG > 4
+	fprintf(stderr, "filter()\n");
+#endif
 	if (event->type == KeyPress /*|| event->type == KeyRelease*/)
 	{
-		XKeyEvent *ke = (XKeyEvent *)event;
+#if DEBUG > 4
+		fprintf(stderr, "key press/release\n");
+#endif
+		ke = (XKeyEvent *)event;
 		if (!ke->send_event && !(ke->state & 0xFF/* kbd modifiers */))
 		{
-			KeySym keysym = XLookupKeysym(ke, 0);
-			if (keysym == XK_F12)
+#if DEBUG > 3
+			fprintf(stderr, "got keycode: 0x%x\n", ke->keycode);
+#endif
+			if (ke->keycode == g_xKeyCodeF11)
 			{
-				static Time t = 0;
+#if DEBUG > 2
+				fprintf(stderr, "Stats key recognized\n");
+#endif
+				rc = True;
+				/* TODO delay/call through thread */
+				doStatsUpdate();
+			}
+			else if (ke->keycode == g_xKeyCodeF12)
+			{
 				/* Let's not run havoc on too many events (KeyRepeat?). Allow every 50ms */
 				if (ke->time - t > 50)
 				{
 					t = ke->time;
-#if DEBUG > 1
-					fprintf(stderr, "keysym: 0x%lx\n", keysym);
+					rc = True;
+#if DEBUG > 2
+					fprintf(stderr, "Screenshot key recognized\n");
 #endif
-					return True;
 				}
 #if DEBUG > 1
-				fprintf(stderr, "keysym skipped: 0x%lx\n", keysym);
+				else
+					fprintf(stderr, "Screenshot key skipped due to flooding (<50ms)\n");
 #endif
 			}
 		}
 
 	}
-	return False;
+	return rc;
 }
 
 static void handleRequest(Display *dpy)
@@ -662,35 +690,78 @@ static void steamSetup(void)
  * Overloads for LD_PRELOAD
  *
  */
+extern Display *XOpenDisplay(const char *name)
+{
+#if DEBUG > 2
+	fprintf(stderr, "%s()\n", __FUNCTION__);
+#endif
+	Display *dpy = g_realXOpenDisplay(name);
+
+	if (dpy)
+	{
+		/* Initialize and get key codes for filter(). Should also reduce
+		 * possibility of dead-locking during runtime for apps doing excessive
+		 * display locking. */
+		g_xKeyCodeF12 = XKeysymToKeycode(dpy, XK_F11);
+		g_xKeyCodeF12 = XKeysymToKeycode(dpy, XK_F12);
+	}
+
+#if DEBUG > 2
+	fprintf(stderr, "%s() returning %p\n", __FUNCTION__, dpy);
+#endif
+	return dpy;
+}
+
 extern int XEventsQueued(Display *dpy, int mode)
 {
 #if DEBUG > 2
-	fprintf(stderr, "XEventsQueued\n");
+	fprintf(stderr, "%s()\n", __FUNCTION__);
 #endif
 	handleRequest(dpy);
-	return g_realXEventsQueued(dpy, mode);
+#if DEBUG > 3
+	fprintf(stderr, "%s() calling real\n", __FUNCTION__);
+#endif
+	int rc = g_realXEventsQueued(dpy, mode);
+#if DEBUG > 2
+	fprintf(stderr, "%s() returning %d\n", __FUNCTION__, rc);
+#endif
+	return rc;
 }
 
 extern int XLookupString(XKeyEvent *ke, char *bufret, int bufsiz,
 		KeySym *keysym, XComposeStatus *status_in_out)
 {
 #if DEBUG > 2
-	fprintf(stderr, "XLookupString\n");
+	fprintf(stderr, "%s()\n", __FUNCTION__);
 #endif
 	if (filter(ke->display, (XEvent *)ke, NULL))
 	{
 		handleScreenShot(ke->display, ke->window);
 	}
-	return g_realXLookupString(ke, bufret, bufsiz, keysym, status_in_out);
+#if DEBUG > 3
+	fprintf(stderr, "%s() calling real\n", __FUNCTION__);
+#endif
+	int rc = g_realXLookupString(ke, bufret, bufsiz, keysym, status_in_out);
+#if DEBUG > 2
+	fprintf(stderr, "%s() returning %d\n", __FUNCTION__, rc);
+#endif
+	return rc;
 }
 
 extern int XPending(Display *dpy)
 {
 #if DEBUG > 2
-	fprintf(stderr, "XPending\n");
+	fprintf(stderr, "%s()\n", __FUNCTION__);
 #endif
 	handleRequest(dpy);
-	return g_realXPending(dpy);
+#if DEBUG > 3
+	fprintf(stderr, "%s() calling real\n", __FUNCTION__);
+#endif
+	int rc = g_realXPending(dpy);
+#if DEBUG > 2
+	fprintf(stderr, "%s() returning %d\n", __FUNCTION__, rc);
+#endif
+	return rc;
 }
 
 extern Bool SteamAPI_Init(void)
