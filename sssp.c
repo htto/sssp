@@ -23,10 +23,11 @@
 #include <X11/extensions/Xdamage.h>
 #include <X11/extensions/Xrender.h>
 
-#define UNUSED __attribute__((unused))
 #define CPPSTR(s) #s
 #define ISTEAMERROR(i, v) "ERROR: " #i " is NULL! " \
 	"Check interface version " CPPSTR(v) " in libsteam_api.so."
+#define UNUSED __attribute__((unused))
+#define USE_OLD_USERSTATS 0
 
 /**
  *
@@ -42,8 +43,21 @@
 #define STEAMSCREENSHOTS_INTERFACE_VERSION "STEAMSCREENSHOTS_INTERFACE_VERSION002"
 /* The unified messages interface version */
 #define STEAMUNIFIEDMESSAGES_INTERFACE_VERSION "STEAMUNIFIEDMESSAGES_INTERFACE_VERSION001"
+/* the user stats interface version */
+#if USE_OLD_USERSTATS
+#	define STEAMUSERSTATS_INTERFACE_VERSION "STEAMUSERSTATS_INTERFACE_VERSION002"
+#else
+#	define STEAMUSERSTATS_INTERFACE_VERSION "STEAMUSERSTATS_INTERFACE_VERSION011"
+#endif
 
 #define ERESULT_OK 1
+
+/* App id */
+typedef struct {
+	uint32_t appId : 24;
+	uint32_t type : 8;
+	uint32_t modId : 32;
+} SteamAppID;
 
 /* SteamID is same as in SDK and 64 bits total */
 typedef union
@@ -94,6 +108,38 @@ typedef struct
 typedef struct
 {
 	struct {
+#if USE_OLD_USERSTATS
+		uint32_t (*GetNumStats)(void *thiz, SteamAppID appId);
+		const char *(*GetStatName)(void *thiz, SteamAppID appId, uint32_t idx);
+		uint32_t (*GetStatType)(void *thiz, SteamAppID appId, const char *name);
+		uint32_t (*GetNumAchievements)(void *thiz, SteamAppID appId);
+		const char *(*GetAchievementName)(void *thiz, SteamAppID appId, uint32_t idx);
+		Bool (*RequestCurrentStats)(void *thiz, SteamAppID appId);
+		Bool (*GetStat)(void *thiz, SteamAppID appId, const char *name, int32_t *pData);
+		Bool (*GetStatF)(void *thiz, SteamAppID appId, const char *name, float *pData);
+		void *funcs1[3];
+		Bool (*GetAchievementAndUnlockTime)(void *thiz, SteamAppID appId, const char *name, Bool *achieved, uint32_t *tstamp);
+#else
+		Bool (*RequestCurrentStats)(void *thiz);
+		Bool (*GetStat)(void *thiz, const char *name, int32_t *pData);
+		Bool (*GetStatF)(void *thiz, const char *name, float *pData);
+		void *funcs1[3];
+		Bool (*GetAchievement)(void *thiz, const char *name, Bool *achieved);
+		void *funcs2[2];
+		Bool (*GetAchievementAndUnlockTime)(void *thiz, const char *name, Bool *achieved, uint32_t *tstamp);
+		void *funcs3[2];
+		const char *(*GetAchievementDisplayAttribute)(void *thiz, const char *name, const char *key);
+		void *funcs4[1];
+		uint32_t (*GetNumAchievements)(void *thiz);
+		const char *(*GetAchievementName)(void *thiz, uint32_t idx);
+#endif
+		/* ... */
+	} *vtab;
+} ISteamUserStats;
+
+typedef struct
+{
+	struct {
 		void *funcs1[9];
 		uint32_t (*GetAppID)(void *thiz);
 		/* ... */
@@ -107,11 +153,13 @@ typedef struct
 		ISteamUser *(*GetISteamUser)(void *thiz, int32_t user, int32_t pipe, const char *);
 		void *funcs2[3];
 		ISteamUtils *(*GetISteamUtils)(void *thiz, int32_t pipe, const char *);
-		void *funcs3[8];
-		ISteamScreenshots *(*GetISteamScreenshots)(void *thiz, int32_t user, int32_t pipe, const char *);
+		void *funcs3[3];
+		ISteamUserStats *(*GetISteamUserStats)(void *thiz, int32_t user, int32_t pipe, const char *);
 		void *funcs4[4];
-		// TODO #ifdef _PS3 void *funcs4ps[1]; #endif
-		void *funcs5[1];
+		ISteamScreenshots *(*GetISteamScreenshots)(void *thiz, int32_t user, int32_t pipe, const char *);
+		void *funcs5[4];
+		// TODO #ifdef _PS3 void *funcs5ps[1]; #endif
+		void *funcs6[1];
 		ISteamUnifiedMessages *(*GetISteamUnifiedMessages)(void *thiz, int32_t user, int32_t pipe, const char *);
 		/* ... */
 	} *vtab;
@@ -139,10 +187,11 @@ hookPFunc g_realXPending;
 
 /* Steam variables */
 static SteamID g_steamUserID;
-static uint32_t g_steamAppID;
+static SteamAppID g_steamAppID;
 static Bool g_steamInitialized = False;
 static ISteamScreenshots *g_steamIScreenshot = NULL;
 static ISteamUnifiedMessages *g_steamIUnifiedMessage = NULL;
+static ISteamUserStats *g_steamIUserStats = NULL;
 
 /* X11 */
 static Display *g_xDisplay;
@@ -344,7 +393,6 @@ static void *captureScreenShot(Display *dpy, Window win, int *w, int *h)
 
 static void handleScreenShot(Display *dpy, Window win)
 {
-	fprintf(stderr, "handleScreenShot\n");
 	g_xDisplay = dpy;
 	g_shotWin = win;
 
@@ -353,6 +401,11 @@ static void handleScreenShot(Display *dpy, Window win)
 	tval.it_value.tv_nsec = 10000;
 	tval.it_interval.tv_sec = 0;
 	tval.it_interval.tv_nsec = 0;
+
+#if DEBUG > 0
+	fprintf(stderr, "%s()\n", __FUNCTION__);
+#endif
+
 	int rc = timer_settime(g_screenshotTimer, 0, &tval, NULL);
 	if (rc)
 		perror("timer_settime(g_screenshotTimer)");
@@ -486,6 +539,68 @@ static void doScreenShot(Display *dpy, Window win)
 	free(image);
 }
 
+static void doStatsUpdate()
+{
+	if (!g_steamIUserStats)
+		return;
+
+#if USE_OLD_USERSTATS
+	if (g_steamIUserStats->vtab->RequestCurrentStats(g_steamIUserStats, g_steamAppID))
+	{
+		uint32_t scount = g_steamIUserStats->vtab->GetNumStats(g_steamIUserStats, g_steamAppID);
+		uint32_t i = 0;
+
+		while (scount && i++ < scount - 1)
+		{
+			const char *sname = g_steamIUserStats->vtab->GetStatName(g_steamIUserStats, g_steamAppID, i);
+			fprintf(stderr, "stats[%d].sname: %s\n", i, sname);
+			Bool sachieved = False;
+			uint32_t tstamp = 0;
+			if (g_steamIUserStats->vtab->GetAchievementAndUnlockTime(g_steamIUserStats, g_steamAppID, sname, &sachieved, &tstamp))
+			{
+				fprintf(stderr, "stats[%d].achieved: %d\n", i, sachieved);
+				if (sachieved)
+					fprintf(stderr, "stats[%d].tsamp: 0x%x\n", i, tstamp);
+			}
+
+			int32_t sdata = -1;
+			if (g_steamIUserStats->vtab->GetStat(g_steamIUserStats, g_steamAppID, sname, &sdata))
+			{
+				fprintf(stderr, "stats[%d].data: 0x%x\n", i, sdata);
+			}
+		}
+	}
+#else
+	if (g_steamIUserStats->vtab->RequestCurrentStats(g_steamIUserStats))
+	{
+		uint32_t scount = g_steamIUserStats->vtab->GetNumAchievements(g_steamIUserStats);
+		uint32_t i = 0;
+		while (scount && i++ < scount - 1)
+		{
+			const char *sname = g_steamIUserStats->vtab->GetAchievementName(g_steamIUserStats, i);
+			fprintf(stderr, "stats[%d].sname: %s\n", i, sname);
+			Bool sachieved = False;
+			uint32_t tstamp = 0;
+			if (g_steamIUserStats->vtab->GetAchievementAndUnlockTime(g_steamIUserStats, sname, &sachieved, &tstamp))
+			{
+				fprintf(stderr, "stats[%d].achieved: %d\n", i, sachieved);
+				if (sachieved)
+					fprintf(stderr, "stats[%d].tsamp: 0x%x\n", i, tstamp);
+			}
+
+			fprintf(stderr, "LALA: %s\n", g_steamIUserStats->vtab->GetAchievementDisplayAttribute(g_steamIUserStats, sname, "name"));
+			fprintf(stderr, "LALA: %s\n", g_steamIUserStats->vtab->GetAchievementDisplayAttribute(g_steamIUserStats, sname, "desc"));
+			fprintf(stderr, "LALA: %s\n", g_steamIUserStats->vtab->GetAchievementDisplayAttribute(g_steamIUserStats, sname, "statvalue"));
+			int32_t sdata = -1;
+			if (g_steamIUserStats->vtab->GetStat(g_steamIUserStats, sname, &sdata))
+			{
+				fprintf(stderr, "stats[%d].data: %x\n", i, sdata);
+			}
+		}
+	}
+#endif
+}
+
 /* Filter XEvent */
 static Bool filter(Display *dpy UNUSED, XEvent *event, XPointer arg UNUSED)
 {
@@ -585,7 +700,7 @@ static void steamSetup(void)
 
 	g_steamUserID = su->vtab->GetSteamID(su);
 #if DEBUG > 1
-	fprintf(stderr, "id: %llu %u\n", g_steamUserID.as64Bit, g_steamUserID.asComponent.accountID);
+	fprintf(stderr, "id: %ju %u\n", g_steamUserID.as64Bit, g_steamUserID.asComponent.accountID);
 	fflush(stderr);
 #endif
 
@@ -595,9 +710,11 @@ static void steamSetup(void)
 		fprintf(stderr, ISTEAMERROR(SteamUtils, STEAMUTILS_INTERFACE_VERSION));
 		return;
 	}
-	g_steamAppID = sut->vtab->GetAppID(sut);
+	g_steamAppID.appId = sut->vtab->GetAppID(sut);
+	g_steamAppID.modId = 0;
+	g_steamAppID.type = 0;
 #if DEBUG > 1
-	fprintf(stderr, "aid: %u\n", g_steamAppID);
+	fprintf(stderr, "aid: %u\n", g_steamAppID.appId);
 	fflush(stderr);
 #endif
 
@@ -614,6 +731,17 @@ static void steamSetup(void)
 		fprintf(stderr, ISTEAMERROR(SteamUnifiedMessages, STEAMUNIFIEDMESSAGES_INTERFACE_VERSION));
 		return;
 	}
+
+	g_steamIUserStats = sc->vtab->GetISteamUserStats(sc, hsu, hsp, STEAMUSERSTATS_INTERFACE_VERSION);
+	if (!g_steamIUserStats)
+	{
+		fprintf(stderr, ISTEAMERROR(SteamUserStats, STEAMUSERSTATS_INTERFACE_VERSION));
+		return;
+	}
+
+#if 0
+	doStatsUpdate();
+#endif
 
 #if 0
 	Bool b;
@@ -769,7 +897,7 @@ extern Bool SteamAPI_Init(void)
 	Bool r;
 
 #if DEBUG > 1
-	fprintf(stderr, "SteamAPI_Init\n");
+	fprintf(stderr, "%s()\n", __FUNCTION__);
 #endif
 	r = g_realSteamAPI_Init();
 
@@ -784,7 +912,7 @@ extern Bool SteamAPI_InitSafe(void)
 	Bool r;
 
 #if DEBUG > 1
-	fprintf(stderr, "SteamAPI_InitSafe\n");
+	fprintf(stderr, "%s()\n", __FUNCTION__);
 #endif
 	r = g_realSteamAPI_InitSafe();
 
