@@ -137,20 +137,17 @@ __attribute__((constructor)) static void init(void)
 
 	ssspRunning = True;
 	g_realXEventsQueued = (hookPFunc)findHook(NULL, "XEventsQueued");
-	g_realXOpenDisplay = (hookPCPFunc)findHook(NULL, "XOpenDisplay");
 	g_realXLookupString = (hookPFunc)findHook(NULL, "XLookupString");
+	g_realXOpenDisplay = (hookPCPFunc)findHook(NULL, "XOpenDisplay");
 	g_realXPending = (hookPFunc)findHook(NULL, "XPending");
-	/* We need symbols from libsteam_api, so require it to be loaded. */
-	g_realSteamAPI_Init = (hookFunc)findHook("libsteam_api.so", "SteamAPI_Init");
-	g_realSteamAPI_InitSafe = (hookFunc)findHook("libsteam_api.so", "SteamAPI_InitSafe");
 
-	if (!(g_realXEventsQueued && g_realXLookupString && g_realXPending &&
-				g_realSteamAPI_Init && g_realSteamAPI_InitSafe))
+	if (!(g_realXEventsQueued && g_realXLookupString && g_realXOpenDisplay && g_realXPending))
 	{
-		fprintf(stderr, "ERROR: Unable to set up hooks. Won't work this way. "
+		fprintf(stderr, "ERROR: Unable to set up X11 hooks. Won't work this way. "
 				"Please disable this module from being LD_PRELOAD'ed.\n");
 		/* TODO don't fail? */
 		//exit(1);
+		return;
 	}
 
 	struct sigevent sevp;
@@ -526,6 +523,22 @@ static void handleRequest(Display *dpy)
 	}
 }
 
+static Bool steamPrepare()
+{
+	/* We need symbols from libsteam_api, so require it to be loaded. */
+	g_realSteamAPI_Init = (hookFunc)findHook("libsteam_api.so", "SteamAPI_Init");
+	g_realSteamAPI_InitSafe = (hookFunc)findHook("libsteam_api.so", "SteamAPI_InitSafe");
+
+	if (!(g_realSteamAPI_Init && g_realSteamAPI_InitSafe))
+	{
+		fprintf(stderr, "ERROR: Unable to set up steam hooks. Won't work this way. "
+				"Please disable this module from being LD_PRELOAD'ed.\n");
+		return False;
+	}
+
+	return True;
+}
+
 /* Grab the various handles from the interfaces. Actually userid and appid aren't needed. */
 static void steamSetup(void)
 {
@@ -758,7 +771,10 @@ extern Bool SteamAPI_Init(void)
 #if DEBUG > 1
 	fprintf(stderr, "%s()\n", __FUNCTION__);
 #endif
-	r = g_realSteamAPI_Init();
+	r = steamPrepare();
+
+	if (r)
+		r = g_realSteamAPI_Init();
 
 	if (r)
 		steamSetup();
@@ -773,7 +789,10 @@ extern Bool SteamAPI_InitSafe(void)
 #if DEBUG > 1
 	fprintf(stderr, "%s()\n", __FUNCTION__);
 #endif
-	r = g_realSteamAPI_InitSafe();
+	r = steamPrepare();
+
+	if (r)
+		r = g_realSteamAPI_InitSafe();
 
 	if (r)
 		steamSetup();
