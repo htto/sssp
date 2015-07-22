@@ -1,4 +1,4 @@
-CFLAGS=-march=native -O2 -DDEBUG=5 -ggdb
+CFLAGS=-march=native -O2 -DDEBUG=2 -ggdb
 WFLAGS=-Wall -Wextra
 
 INCS=$(shell pkg-config --cflags x11 xcomposite xdamage xfixes xrender) -Icontrib/include
