@@ -90,6 +90,7 @@ static void userFbTimerHandler(union sigval val UNUSED)
 {
 	if (g_userFbWin)
 	{
+		/* FIXME handle error (BadWindow?) */
 		/* Disappears on next repaint of parent */
 		XUnmapWindow(g_xDisplay, g_userFbWin);
 		/* Try to trigger repaint by flushing events */
@@ -710,6 +711,22 @@ extern Display *XOpenDisplay(const char *name)
 	fprintf(stderr, "%s() returning %p\n", __FUNCTION__, dpy);
 #endif
 	return dpy;
+}
+
+extern int XGrabServer(Display *dpy)
+{
+#if DEBUG > 2
+	fprintf(stderr, "%s()\n", __FUNCTION__);
+#endif
+	return 0;
+}
+
+extern int XUngrabServer(Display *dpy)
+{
+#if DEBUG > 2
+	fprintf(stderr, "%s()\n", __FUNCTION__);
+#endif
+	return 0;
 }
 
 extern int XEventsQueued(Display *dpy, int mode)
