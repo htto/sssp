@@ -9,6 +9,7 @@
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <link.h>
 #include <errno.h>
 #include <signal.h>
 #include <stdint.h>
@@ -43,6 +44,8 @@ hookPFunc g_realXEventsQueued;
 hookPFunc g_realXLookupString;
 hookPCPFunc g_realXOpenDisplay;
 hookPFunc g_realXPending;
+
+hookPCPFunc g_realDlsym = NULL;
 
 /* Steam variables */
 static SteamID g_steamUserID;
@@ -112,12 +115,53 @@ static void *findHook(const char *mod, const char *name)
 	if (!m)
 		fprintf(stderr, "Unable to query module %s!\n", mod);
 
-	h = m ? dlsym(m, name) : NULL;
+	h = m ? g_realDlsym(m, name) : NULL;
 
 	if (!h)
 		fprintf(stderr, "Unable to hook %s!\n", name);
 
 	return h;
+}
+
+/* Look up the real dlsym, to filter and redirect dlsym calls. */
+static Bool findDlSym()
+{
+	ElfW(Sym) *sym;
+	ElfW(Addr) base = NULL, strTab = NULL, symTab = NULL;
+	struct link_map *dli = NULL;
+
+	void *mm = dlopen("libdl.so.2", RTLD_NOW);
+	if (dlinfo(mm, RTLD_DI_LINKMAP, &dli) == 0 && dli)
+		base = dli->l_addr;
+
+	if (base)
+	{
+		for (ElfW(Dyn) *dyn = dli->l_ld; dyn->d_tag != DT_NULL; ++dyn)
+		{
+			switch (dyn->d_tag)
+			{
+				case DT_STRTAB:
+					strTab = dyn->d_un.d_ptr;
+					break;
+				case DT_SYMTAB:
+					symTab = dyn->d_un.d_ptr;
+					break;
+			}
+		}
+
+		for (sym = (ElfW(Sym) *)symTab; sym < (ElfW(Sym) *)strTab; sym++)
+		{
+			if (strncmp((char *)(strTab + sym->st_name), "dlsym", 5) == 0)
+			{
+				g_realDlsym = (void *)(base + sym->st_value);
+				break;
+			}
+		}
+	}
+
+	dlclose(mm);
+
+	return g_realDlsym != NULL;
 }
 
 /* Initialization */
@@ -137,6 +181,14 @@ __attribute__((constructor)) static void init(void)
 	}
 
 	ssspRunning = True;
+
+	if (!findDlSym())
+	{
+		fprintf(stderr, "ERROR: Unable to set up dlsym hook. Won't work this way. "
+				"Please disable this module from being LD_PRELOAD'ed.\n");
+		return;
+	}
+
 	g_realXEventsQueued = (hookPFunc)findHook(NULL, "XEventsQueued");
 	g_realXLookupString = (hookPFunc)findHook(NULL, "XLookupString");
 	g_realXOpenDisplay = (hookPCPFunc)findHook(NULL, "XOpenDisplay");
@@ -179,7 +231,8 @@ __attribute__((destructor)) static void deinit(void)
 	fprintf(stderr, "sssp_xy.so being unloaded from program '%s' (%s).\n",
 			program_invocation_short_name, program_invocation_name);
 
-	timer_delete(g_userFbTimer);
+	if (g_userFbTimer)
+		timer_delete(g_userFbTimer);
 }
 
 /**
@@ -713,12 +766,28 @@ extern Display *XOpenDisplay(const char *name)
 	return dpy;
 }
 
-extern int XGrabServer(Display *dpy)
+extern int XGrabKeyboard(Display *dpy, Window win, Bool owner_events, int pointer_mode, int keyboard_mode, Time time)
+{
+#if DEBUG > 2
+	fprintf(stderr, "%s()\n", __FUNCTION__);
+#endif
+	return AlreadyGrabbed;
+}
+
+extern int XUngrabKeyboard(Display *dpy, Time time)
 {
 #if DEBUG > 2
 	fprintf(stderr, "%s()\n", __FUNCTION__);
 #endif
 	return 0;
+}
+
+extern int XGrabServer(Display *dpy)
+{
+#if DEBUG > 2
+	fprintf(stderr, "%s()\n", __FUNCTION__);
+#endif
+	return AlreadyGrabbed;
 }
 
 extern int XUngrabServer(Display *dpy)
@@ -815,4 +884,16 @@ extern Bool SteamAPI_InitSafe(void)
 		steamSetup();
 
 	return r;
+}
+
+extern void *dlsym(void *handle, const char *symbol)
+{
+#if DEBUG > 2
+	fprintf(stderr, "%s(%p, %s)\n", __FUNCTION__, handle, symbol);
+#endif
+
+	if (strcmp(symbol, "XGrabKeyboard") == 0)
+		handle = NULL;
+
+	return g_realDlsym(handle, symbol);
 }
