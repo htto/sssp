@@ -256,27 +256,51 @@ static inline uint8_t mask32To8(uint32_t val, uint32_t mask)
 }
 
 /* Acquire/write Screenshot */
-static void *captureScreenShot(Display *dpy, Window win, int *w, int *h)
+static void *captureScreenShot(Display *dpy, Window *win, int *w, int *h)
 {
-	XImage *image;
-	XWindowAttributes attrs;
+	XWindowAttributes attrs, cattrs;
+	Window c, p;
 	uint8_t *data;
+	int dx = -1, dy = -1;
 	int i;
+	XImage *image;
 
-	/* XGrabServer(dpy); */
-	if (XGetWindowAttributes(dpy, win, &attrs) == 0 ||
-			/* TODO switch to XRenderCreatePicture */
-			(image = XGetImage(dpy, win, 0, 0, attrs.width, attrs.height,
-							   AllPlanes, ZPixmap)) == NULL)
+	if (XGetWindowAttributes(dpy, *win, &attrs) == 0)
 	{
-		/* XUngrabServer(dpy); */
-		fprintf(stderr, "failed to acquire window attributes/screenshot!");
+		fprintf(stderr, "failed to acquire window attributes!");
 		return NULL;
 	}
-	/* XUngrabServer(dpy); */
+
+	/* Can't directly use win, because SDL1 does have three windows, but only
+	 * only one for the content. Instead we translate from the root window and
+	 * let X hand us the appropriate mapped client window. */
+	c = p = attrs.root;
+	while (dx != 0 || dy != 0)
+	{
+		if (!XTranslateCoordinates(dpy, *win, p, 0, 0, &dx, &dy, &c) ||
+			c == None || XGetWindowAttributes(dpy, c, &cattrs) == 0 ||
+			cattrs.height < attrs.height || cattrs.width < attrs.width)
+		{
+			break;
+		}
+
+#if DEBUG > 2
+			fprintf(stderr, "XTranslateCoordinates: %d/%d %d/%d 0x%lx %d/%d\n", attrs.x, attrs.y, attrs.width, attrs.height, c, dx, dy);
+#endif
+			p = c;
+	}
+
+	/* Update win to the one we grab from and we can display the feedback in. */
+	*win = p;
+	/* TODO switch to XRenderCreatePicture */
+	if ((image = XGetImage(dpy, *win, 0, 0, attrs.width, attrs.height, AllPlanes, ZPixmap)) == NULL)
+	{
+		fprintf(stderr, "failed to acquire window screenshot!");
+		return NULL;
+	}
 
 #if DEBUG > 0
-	fprintf(stderr, "Grabbed image of size %dx%d and depth %d.\n", image->width, image->height, image->depth);
+	fprintf(stderr, "Grabbed image of window 0x%lx (size %dx%d, depth %d).\n", *win, image->width, image->height, image->depth);
 #endif
 
 	/* Convert to plain RGB as required by steam. */
@@ -323,8 +347,9 @@ static void doScreenShot(Display *dpy, Window win)
 {
 	/* User feedback size */
 	int w, h;
+	uint32_t ccount;
 	XWindowAttributes attrs;
-	fprintf(stderr, "doScreenShot\n");
+	fprintf(stderr, "doScreenShot(%p, 0x%lx)\n", dpy, win);
 
 	if (g_userFbWin)
 	{
@@ -333,12 +358,11 @@ static void doScreenShot(Display *dpy, Window win)
 	}
 
 	/* Image grabbed through X11 and converted to RGB */
-	void *image = captureScreenShot(dpy, win, &w, &h);
+	void *image = captureScreenShot(dpy, &win, &w, &h);
 	if (!image)
 		return;
 
 	/* User feedback */
-#if 1
 	if (XGetWindowAttributes(dpy, win, &attrs) != 0)
 	{
 		const int fbb = 2, fbh = 100, fbw = fbh * (attrs.width * 1.0 / attrs.height);
@@ -409,12 +433,12 @@ static void doScreenShot(Display *dpy, Window win)
 		if (rc)
 			perror("timer_settime(g_userFbTimer)");
 	}
-#endif
 
 	/* Issue the RGB image directly to steam. */
-	if (g_steamInitialized && !g_steamIScreenshot->vtab->WriteScreenshot(g_steamIScreenshot, image, 3 * w * h, w, h))
+	if (g_steamInitialized)
 	{
-		fprintf(stderr, "Failed to issue screenshot to steam.\n");
+		if (!g_steamIScreenshot->vtab->WriteScreenshot(g_steamIScreenshot, image, 3 * w * h, w, h))
+			fprintf(stderr, "Failed to issue screenshot to steam.\n");
 	}
 	else
 	{
@@ -745,41 +769,70 @@ static void steamSetup(void)
 extern Display *XOpenDisplay(const char *name)
 {
 #if DEBUG > 2
-	fprintf(stderr, "%s()\n", __FUNCTION__);
+	fprintf(stderr, "%s(%s)\n", __FUNCTION__, name);
 #endif
-	Display *dpy = g_realXOpenDisplay(name);
-
-	if (dpy)
+	if (!g_xDisplay)
 	{
-		/* Initialize and get key codes for filter(). Should also reduce
-		 * possibility of dead-locking during runtime for apps doing excessive
-		 * display locking. */
-		g_xKeyCodeF12 = XKeysymToKeycode(dpy, XK_F11);
-		g_xKeyCodeF12 = XKeysymToKeycode(dpy, XK_F12);
+		g_xDisplay = g_realXOpenDisplay(name);
+
+		if (g_xDisplay)
+		{
+			/* Initialize and get key codes for filter(). Should also reduce
+			 * possibility of dead-locking during runtime for apps doing excessive
+			 * display locking. */
+			g_xKeyCodeF12 = XKeysymToKeycode(g_xDisplay, XK_F11);
+			g_xKeyCodeF12 = XKeysymToKeycode(g_xDisplay, XK_F12);
+		}
 	}
 
 #if DEBUG > 2
-	fprintf(stderr, "%s() returning %p\n", __FUNCTION__, dpy);
+	fprintf(stderr, "%s() returning %p\n", __FUNCTION__, g_xDisplay);
 #endif
-	return dpy;
+	return g_xDisplay;
 }
 
-extern int XGrabKeyboard(Display *dpy, Window win, Bool owner_events, int pointer_mode, int keyboard_mode, Time time)
+extern int XCloseDisplay(Display *dpy)
 {
 #if DEBUG > 2
-	fprintf(stderr, "%s()\n", __FUNCTION__);
+	fprintf(stderr, "%s(%p)\n", __FUNCTION__, dpy);
 #endif
-	return AlreadyGrabbed;
+
+	return True;
 }
 
-extern int XUngrabKeyboard(Display *dpy, Time time)
+extern int XGrabKeyboard(Display *dpy, Window win, Bool oe, int pm, int km, Time t)
 {
 #if DEBUG > 2
-	fprintf(stderr, "%s()\n", __FUNCTION__);
+	fprintf(stderr, "%s(%p, 0x%lx, %d, 0x%x, 0x%x, 0x%lx)\n", __FUNCTION__, dpy, win, oe, pm, km, t);
 #endif
-	return 0;
+	return GrabSuccess;
 }
 
+extern int XGrabPointer(Display *dpy, Window win, Bool oe, uint32_t em, int pm, int km, Window ct, Cursor c, Time t)
+{
+#if DEBUG > 2
+	fprintf(stderr, "%s(%p, 0x%lx, %d, 0x%x, 0x%x, 0x%x, 0x%lx, 0x%lx, 0x%lx)\n", __FUNCTION__, dpy, win, oe, em, pm, km, ct, c, t);
+#endif
+	return GrabSuccess;
+}
+
+extern int XUngrabKeyboard(Display *dpy, Time t)
+{
+#if DEBUG > 2
+	fprintf(stderr, "%s(%p, 0x%lx)\n", __FUNCTION__, dpy, t);
+#endif
+	return GrabSuccess;
+}
+
+extern int XUngrabPointer(Display *dpy, Time t)
+{
+#if DEBUG > 2
+	fprintf(stderr, "%s(%p, 0x%lx)\n", __FUNCTION__, dpy, t);
+#endif
+	return GrabSuccess;
+}
+
+#if 0
 extern int XGrabServer(Display *dpy)
 {
 #if DEBUG > 2
@@ -795,54 +848,57 @@ extern int XUngrabServer(Display *dpy)
 #endif
 	return 0;
 }
+#endif
 
 extern int XEventsQueued(Display *dpy, int mode)
 {
-#if DEBUG > 2
+#if DEBUG > 3
 	fprintf(stderr, "%s()\n", __FUNCTION__);
 #endif
 	handleRequest(dpy);
-#if DEBUG > 3
+#if DEBUG > 4
 	fprintf(stderr, "%s() calling real\n", __FUNCTION__);
 #endif
 	int rc = g_realXEventsQueued(dpy, mode);
-#if DEBUG > 2
+#if DEBUG > 3
 	fprintf(stderr, "%s() returning %d\n", __FUNCTION__, rc);
 #endif
 	return rc;
 }
 
+#if 0
 extern int XLookupString(XKeyEvent *ke, char *bufret, int bufsiz,
 		KeySym *keysym, XComposeStatus *status_in_out)
 {
-#if DEBUG > 2
+#if DEBUG > 3
 	fprintf(stderr, "%s()\n", __FUNCTION__);
 #endif
 	if (filter(ke->display, (XEvent *)ke, NULL))
 	{
 		handleScreenShot(ke->display, ke->window);
 	}
-#if DEBUG > 3
+#if DEBUG > 4
 	fprintf(stderr, "%s() calling real\n", __FUNCTION__);
 #endif
 	int rc = g_realXLookupString(ke, bufret, bufsiz, keysym, status_in_out);
-#if DEBUG > 2
+#if DEBUG > 3
 	fprintf(stderr, "%s() returning %d\n", __FUNCTION__, rc);
 #endif
 	return rc;
 }
+#endif
 
 extern int XPending(Display *dpy)
 {
-#if DEBUG > 2
+#if DEBUG > 3
 	fprintf(stderr, "%s()\n", __FUNCTION__);
 #endif
 	handleRequest(dpy);
-#if DEBUG > 3
+#if DEBUG > 4
 	fprintf(stderr, "%s() calling real\n", __FUNCTION__);
 #endif
 	int rc = g_realXPending(dpy);
-#if DEBUG > 2
+#if DEBUG > 3
 	fprintf(stderr, "%s() returning %d\n", __FUNCTION__, rc);
 #endif
 	return rc;
@@ -886,11 +942,23 @@ extern Bool SteamAPI_InitSafe(void)
 
 extern void *dlsym(void *handle, const char *symbol)
 {
-#if DEBUG > 2
+#if DEBUG > 3
 	fprintf(stderr, "%s(%p, %s)\n", __FUNCTION__, handle, symbol);
 #endif
 
-	if (strcmp(symbol, "XGrabKeyboard") == 0)
+	if (
+		strcmp(symbol, "XCloseDisplay") == 0 ||
+		strcmp(symbol, "XCreateWindow") == 0 ||
+		strcmp(symbol, "XEventsQueued") == 0 ||
+		strcmp(symbol, "XGrabKeyboard") == 0 ||
+		strcmp(symbol, "XGrabPointer") == 0 ||
+		strcmp(symbol, "XOpenDisplay") == 0 ||
+		strcmp(symbol, "XPending") == 0 ||
+		strcmp(symbol, "XReparentWindow") == 0 ||
+		strcmp(symbol, "XRaiseWindow") == 0 ||
+		strcmp(symbol, "XUngrabKeyboard") == 0 ||
+		strcmp(symbol, "XUngrabPointer") == 0
+	)
 		handle = NULL;
 
 	return g_realDlsym(handle, symbol);
