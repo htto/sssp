@@ -124,7 +124,7 @@ static void *findHook(const char *mod, const char *name)
 }
 
 /* Look up the real dlsym, to filter and redirect dlsym calls. */
-static Bool findDlSym()
+static Bool findDlSym(void)
 {
 	ElfW(Sym) *sym;
 	ElfW(Addr) base = NULL, strTab = NULL, symTab = NULL;
@@ -198,8 +198,6 @@ __attribute__((constructor)) static void init(void)
 	{
 		fprintf(stderr, "ERROR: Unable to set up X11 hooks. Won't work this way. "
 				"Please disable this module from being LD_PRELOAD'ed.\n");
-		/* TODO don't fail? */
-		//exit(1);
 		return;
 	}
 
