@@ -272,10 +272,11 @@ static void *captureScreenShot(Display *dpy, Window *win, int *w, int *h)
 	}
 
 	/* Can't directly use win, because SDL1 does have three windows, but only
-	 * only one for the content. Instead we translate from the root window and
-	 * let X hand us the appropriate mapped client window. */
+	 * one for the content. Instead we translate from the root window and
+	 * let X hand us the appropriate mapped child window that's probably the
+	 * one we want. */
 	c = p = attrs.root;
-	while (dx != 0 || dy != 0)
+	while (1/*dx != 0 || dy != 0*/)
 	{
 		if (!XTranslateCoordinates(dpy, *win, p, 0, 0, &dx, &dy, &c) ||
 			c == None || XGetWindowAttributes(dpy, c, &cattrs) == 0 ||
@@ -285,9 +286,9 @@ static void *captureScreenShot(Display *dpy, Window *win, int *w, int *h)
 		}
 
 #if DEBUG > 2
-			fprintf(stderr, "XTranslateCoordinates: %d/%d %d/%d 0x%lx %d/%d\n", attrs.x, attrs.y, attrs.width, attrs.height, c, dx, dy);
+		fprintf(stderr, "XTranslateCoordinates: %d/%d %d/%d 0x%lx %d/%d\n", attrs.x, attrs.y, attrs.width, attrs.height, c, dx, dy);
 #endif
-			p = c;
+		p = c;
 	}
 
 	/* Update win to the one we grab from and we can display the feedback in. */
@@ -347,7 +348,6 @@ static void doScreenShot(Display *dpy, Window win)
 {
 	/* User feedback size */
 	int w, h;
-	uint32_t ccount;
 	XWindowAttributes attrs;
 	fprintf(stderr, "doScreenShot(%p, 0x%lx)\n", dpy, win);
 
