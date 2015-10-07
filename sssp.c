@@ -109,6 +109,7 @@ static void userFbTimerHandler(union sigval val UNUSED)
 		XUnmapWindow(g_xDisplay, g_userFbWin);
 		/* Try to trigger repaint by flushing events */
 		XFlush(g_xDisplay);
+		usleep(50000);
 	}
 }
 
