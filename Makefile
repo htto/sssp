@@ -1,10 +1,17 @@
-CFLAGS=-march=native -O2 -DDEBUG=2 -ggdb
+CFLAGS=-march=native -Og -ggdb
+DEFINES=-DDEBUG=2 -D_GNU_SOURCE
+SHFLAGS=-fPIC -shared
 WFLAGS=-Wall -Wextra
 
-INCS=$(shell pkg-config --cflags x11 xcomposite xdamage xfixes xrender) -Icontrib/include
-LIBS=-ldl $(shell pkg-config --libs x11 xcomposite xdamage xfixes xrender) -lrt
 
-COMPILE=$(CC) -fPIC -shared $(INCS) $(LIBS) $(WFLAGS) $(CFLAGS)
+SYSTEM_LIBS=-ldl -lrt
+X11_LIBS=x11 xcomposite xdamage xfixes xrender
+
+
+INCS=$(shell pkg-config --cflags $(X11_LIBS)) -Icontrib/include
+LIBS=$(shell pkg-config --libs $(X11_LIBS)) $(SYSTEM_LIBS)
+
+COMPILE=$(CC) $(SHFLAGS) $(DEFINES) $(INCS) $(LIBS) $(WFLAGS) $(CFLAGS)
 
 all: sssp_32.so sssp_64.so
 
