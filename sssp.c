@@ -443,7 +443,7 @@ static void doScreenShot(Display *dpy, Window win)
 	else
 	{
 		// TODO
-		fprintf(stderr, "Steam not initialized, doing custom save.\n");
+		fprintf(stderr, "Steam not initialized, no screenshot saved.\n");
 #if 0
 		/* Hand made fallback disabled in favour of Steam's screenshot writer. */
 		static uint32_t count = 0;
