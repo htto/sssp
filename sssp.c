@@ -992,6 +992,6 @@ extern void *dlsym(void *handle, const char *symbol)
 	)
 		handle = NULL;
 
-	return g_realDlsym(handle, symbol);
+	return g_realDlsym ? g_realDlsym(handle, symbol) : NULL;
 }
 #endif
