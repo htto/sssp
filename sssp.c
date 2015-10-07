@@ -121,7 +121,7 @@ static void userFbTimerHandler(union sigval val UNUSED)
 static void *findHook(const char *mod, const char *name)
 {
 	void *h = NULL;
-	void *m = mod ? dlopen(mod, RTLD_NOW) : RTLD_NEXT;
+	void *m = mod ? dlopen(mod, RTLD_NOW | RTLD_GLOBAL) : RTLD_NEXT;
 
 	if (mod && !m)
 		fprintf(stderr, "Unable to query module %s!\n", mod);
