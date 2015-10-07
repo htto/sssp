@@ -370,13 +370,12 @@ static void doScreenShot(Display *dpy, Window win)
 	/* User feedback size */
 	int w, h;
 	XWindowAttributes attrs;
+	union sigval unused;
+
 	fprintf(stderr, "doScreenShot(%p, 0x%lx)\n", dpy, win);
 
-	if (g_userFbWin)
-	{
-		/* Hide feedback window */
-		XUnmapWindow(dpy, g_userFbWin);
-	}
+	/* Hide feedback window */
+	userFbTimerHandler(unused);
 
 	/* Image grabbed through X11 and converted to RGB */
 	void *image = captureScreenShot(dpy, &win, &w, &h);
