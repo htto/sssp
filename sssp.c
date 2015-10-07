@@ -801,8 +801,14 @@ extern Display *XOpenDisplay(const char *name)
 			/* Initialize and get key codes for filter(). Should also reduce
 			 * possibility of dead-locking during runtime for apps doing excessive
 			 * display locking. */
-			g_xKeyCodeF12 = XKeysymToKeycode(g_xDisplay, XK_F11);
+			g_xKeyCodeF11 = XKeysymToKeycode(g_xDisplay, XK_F11);
+#if DEBUG > 2
+			fprintf(stderr, "Handling KeyCode %d as KeySym %d\n", g_xKeyCodeF11, XK_F11);
+#endif
 			g_xKeyCodeF12 = XKeysymToKeycode(g_xDisplay, XK_F12);
+#if DEBUG > 2
+			fprintf(stderr, "Handling KeyCode %d as KeySym %d\n", g_xKeyCodeF12, XK_F12);
+#endif
 		}
 	}
 
@@ -887,7 +893,7 @@ extern int XEventsQueued(Display *dpy, int mode)
 	return rc;
 }
 
-#if 0
+#if 1
 extern int XLookupString(XKeyEvent *ke, char *bufret, int bufsiz,
 		KeySym *keysym, XComposeStatus *status_in_out)
 {
@@ -974,10 +980,11 @@ extern void *dlsym(void *handle, const char *symbol)
 		strcmp(symbol, "XEventsQueued") == 0 ||
 		strcmp(symbol, "XGrabKeyboard") == 0 ||
 		strcmp(symbol, "XGrabPointer") == 0 ||
+		strcmp(symbol, "XLookupString") == 0 ||
 		strcmp(symbol, "XOpenDisplay") == 0 ||
 		strcmp(symbol, "XPending") == 0 ||
-		strcmp(symbol, "XReparentWindow") == 0 ||
 		strcmp(symbol, "XRaiseWindow") == 0 ||
+		strcmp(symbol, "XReparentWindow") == 0 ||
 		strcmp(symbol, "XUngrabKeyboard") == 0 ||
 		strcmp(symbol, "XUngrabPointer") == 0
 	)
