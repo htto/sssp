@@ -619,7 +619,7 @@ static void handleRequest(Display *dpy)
 	}
 }
 
-static Bool steamPrepare()
+static Bool steamPrepare(void)
 {
 	/* We need symbols from libsteam_api, so require it to be loaded. */
 	g_realSteamAPI_Init = (hookFunc)findHook("libsteam_api.so", "SteamAPI_Init");
