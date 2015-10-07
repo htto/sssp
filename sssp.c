@@ -974,6 +974,8 @@ extern void *dlsym(void *handle, const char *symbol)
 #endif
 
 	if (
+		strcmp(symbol, "SteamAPI_Init") == 0 ||
+		strcmp(symbol, "SteamAPI_InitSafe") == 0 ||
 		strcmp(symbol, "XCloseDisplay") == 0 ||
 		strcmp(symbol, "XCreateWindow") == 0 ||
 		strcmp(symbol, "XEventsQueued") == 0 ||
