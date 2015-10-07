@@ -7,7 +7,6 @@
  * gcc -m64 -o sssp_64.so sssp.c -shared -fPIC `pkg-config --cflags --libs x11`
  *
  */
-#define _GNU_SOURCE
 #include <dlfcn.h>
 #include <link.h>
 #include <errno.h>
@@ -32,11 +31,23 @@
 
 #include "steam_sdk.h"
 
+#ifndef _GNU_SOURCE
+	#warning "GNU-extensions disabled, expect less features."
+
+	#include <libgen.h>
+
+	#define RTLD_NEXT ((void *) -1L);
+
+	char *program_invocation_name = NULL;
+	char *program_invocation_short_name = NULL;
+#endif
+
 /* Hooks */
 typedef int (*hookFunc)(void);
 typedef int (*hookCPFunc)(const void *, ...);
 typedef int (*hookPFunc)(void *, ...);
 typedef void (*hookVPFunc)(void *, ...);
+typedef void *(*hookPPFunc)(void *, ...);
 typedef void *(*hookPCPFunc)(const void *, ...);
 hookFunc g_realSteamAPI_Init;
 hookFunc g_realSteamAPI_InitSafe;
@@ -45,7 +56,7 @@ hookPFunc g_realXLookupString;
 hookPCPFunc g_realXOpenDisplay;
 hookPFunc g_realXPending;
 
-hookPCPFunc g_realDlsym = NULL;
+hookPPFunc g_realDlsym = NULL;
 
 /* Steam variables */
 static SteamID g_steamUserID;
@@ -112,7 +123,7 @@ static void *findHook(const char *mod, const char *name)
 	void *h = NULL;
 	void *m = mod ? dlopen(mod, RTLD_NOW) : RTLD_NEXT;
 
-	if (!m)
+	if (mod && !m)
 		fprintf(stderr, "Unable to query module %s!\n", mod);
 
 	h = m ? g_realDlsym(m, name) : NULL;
@@ -126,6 +137,7 @@ static void *findHook(const char *mod, const char *name)
 /* Look up the real dlsym, to filter and redirect dlsym calls. */
 static Bool findDlSym(void)
 {
+#ifdef _GNU_SOURCE
 	ElfW(Sym) *sym;
 	ElfW(Addr) base = NULL, strTab = NULL, symTab = NULL;
 	struct link_map *dli = NULL;
@@ -160,13 +172,22 @@ static Bool findDlSym(void)
 	}
 
 	dlclose(mm);
-
+#else
+	fprintf(stderr, "No dlsym hooking possible. Expect issues.\n");
+	g_realDlsym = (void*)dlsym;
+#endif
 	return g_realDlsym != NULL;
 }
 
 /* Initialization */
 __attribute__((constructor)) static void init(void)
 {
+#ifndef _GNU_SOURCE
+	/* Try some shell setting */
+	program_invocation_name = getenv("_");
+	if (program_invocation_name)
+		program_invocation_short_name = basename(program_invocation_name);
+#endif
 	fprintf(stderr, "sssp_xy.so loaded into program '%s' (%s).\n",
 			program_invocation_short_name, program_invocation_name);
 
@@ -940,6 +961,7 @@ extern Bool SteamAPI_InitSafe(void)
 	return r;
 }
 
+#ifdef _GNU_SOURCE
 extern void *dlsym(void *handle, const char *symbol)
 {
 #if DEBUG > 3
@@ -963,3 +985,4 @@ extern void *dlsym(void *handle, const char *symbol)
 
 	return g_realDlsym(handle, symbol);
 }
+#endif
