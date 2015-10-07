@@ -139,7 +139,7 @@ static Bool findDlSym(void)
 {
 #ifdef _GNU_SOURCE
 	ElfW(Sym) *sym;
-	ElfW(Addr) base = NULL, strTab = NULL, symTab = NULL;
+	ElfW(Addr) base = 0, strTab = 0, symTab = 0;
 	struct link_map *dli = NULL;
 
 	void *mm = dlopen("libdl.so.2", RTLD_NOW);
@@ -165,7 +165,7 @@ static Bool findDlSym(void)
 		{
 			if (strncmp((char *)(strTab + sym->st_name), "dlsym", 5) == 0)
 			{
-				g_realDlsym = (void *)(base + sym->st_value);
+				g_realDlsym = (hookPPFunc)(base + sym->st_value);
 				break;
 			}
 		}
@@ -174,7 +174,7 @@ static Bool findDlSym(void)
 	dlclose(mm);
 #else
 	fprintf(stderr, "No dlsym hooking possible. Expect issues.\n");
-	g_realDlsym = (void*)dlsym;
+	g_realDlsym = (hookPPFunc)dlsym;
 #endif
 	return g_realDlsym != NULL;
 }
@@ -794,7 +794,7 @@ extern Display *XOpenDisplay(const char *name)
 #endif
 	if (!g_xDisplay)
 	{
-		g_xDisplay = g_realXOpenDisplay(name);
+		g_xDisplay = (Display *)g_realXOpenDisplay(name);
 
 		if (g_xDisplay)
 		{
