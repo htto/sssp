@@ -9,46 +9,21 @@
  */
 #include <dlfcn.h>
 #include <link.h>
-#include <errno.h>
 #include <signal.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
 #include <X11/XKBlib.h>
-#include <X11/Xutil.h>
 #include <X11/extensions/Xcomposite.h>
 #include <X11/extensions/Xdamage.h>
 #include <X11/extensions/Xrender.h>
 
-#define CPPSTR(s) #s
-#define ISTEAMERROR(i, v) "ERROR: " #i " is NULL! " \
-	"Check interface version " CPPSTR(v) " in libsteam_api.so."
-#define UNUSED __attribute__((unused))
-#define USE_OLD_USERSTATS 0
-
 #include "steam_sdk.h"
-
-#ifndef _GNU_SOURCE
-	#warning "GNU-extensions disabled, expect less features."
-
-	#include <libgen.h>
-
-	#define RTLD_NEXT ((void *) -1L);
-
-	char *program_invocation_name = NULL;
-	char *program_invocation_short_name = NULL;
-#endif
+#include "sssp.h"
 
 /* Hooks */
-typedef int (*hookFunc)(void);
-typedef int (*hookCPFunc)(const void *, ...);
-typedef int (*hookPFunc)(void *, ...);
-typedef void (*hookVPFunc)(void *, ...);
-typedef void *(*hookPPFunc)(void *, ...);
-typedef void *(*hookPCPFunc)(const void *, ...);
 hookFunc g_realSteamAPI_Init;
 hookFunc g_realSteamAPI_InitSafe;
 hookPFunc g_realXEventsQueued;
@@ -83,6 +58,8 @@ static XWindowAttributes g_oldFbAttrs;
 /* Internal duplicate loading check */
 extern Bool ssspRunning;
 Bool ssspRunning = False;
+
+enum LogLevel g_logLevel = DFLT_LOG_LEVEL;
 
 /**
  *
