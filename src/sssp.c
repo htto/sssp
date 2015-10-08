@@ -891,7 +891,10 @@ extern void *dlsym(void *handle, const char *symbol)
 		strcmp(symbol, "XUngrabKeyboard") == 0 ||
 		strcmp(symbol, "XUngrabPointer") == 0
 	)
+	{
 		handle = NULL;
+		log(LOG_INFO, "Intercepting dlsym call for symbol %s\n", symbol);
+	}
 
 	return g_realDlsym ? g_realDlsym(handle, symbol) : NULL;
 }
