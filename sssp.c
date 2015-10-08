@@ -926,6 +926,9 @@ extern Bool SteamAPI_Init(void)
 {
 	Bool r;
 
+	if (g_steamInitialized)
+		return True;
+
 #if DEBUG > 1
 	fprintf(stderr, "%s()\n", __FUNCTION__);
 #endif
@@ -943,6 +946,9 @@ extern Bool SteamAPI_Init(void)
 extern Bool SteamAPI_InitSafe(void)
 {
 	Bool r;
+
+	if (g_steamInitialized)
+		return True;
 
 #if DEBUG > 1
 	fprintf(stderr, "%s()\n", __FUNCTION__);
