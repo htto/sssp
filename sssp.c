@@ -789,44 +789,34 @@ static void steamSetup(void)
  */
 extern Display *XOpenDisplay(const char *name)
 {
+	Display *dpy;
+
 #if DEBUG > 2
 	fprintf(stderr, "%s(%s)\n", __FUNCTION__, name);
 #endif
-	if (!g_xDisplay)
+	dpy = (Display *)g_realXOpenDisplay(name);
+
+	if (dpy)
 	{
-		g_xDisplay = (Display *)g_realXOpenDisplay(name);
-
-		if (g_xDisplay)
-		{
-			/* Initialize and get key codes for filter(). Should also reduce
-			 * possibility of dead-locking during runtime for apps doing excessive
-			 * display locking. */
-			g_xKeyCodeF11 = XKeysymToKeycode(g_xDisplay, XK_F11);
+		/* Initialize and get key codes for filter(). Should also reduce
+		 * possibility of dead-locking during runtime for apps doing excessive
+		 * display locking. */
+		g_xKeyCodeF11 = XKeysymToKeycode(dpy, XK_F11);
 #if DEBUG > 2
-			fprintf(stderr, "Handling KeyCode %d as KeySym %d\n", g_xKeyCodeF11, XK_F11);
+		fprintf(stderr, "Handling KeyCode %d as KeySym %d\n", g_xKeyCodeF11, XK_F11);
 #endif
-			g_xKeyCodeF12 = XKeysymToKeycode(g_xDisplay, XK_F12);
+		g_xKeyCodeF12 = XKeysymToKeycode(dpy, XK_F12);
 #if DEBUG > 2
-			fprintf(stderr, "Handling KeyCode %d as KeySym %d\n", g_xKeyCodeF12, XK_F12);
+		fprintf(stderr, "Handling KeyCode %d as KeySym %d\n", g_xKeyCodeF12, XK_F12);
 #endif
-		}
 	}
-
 #if DEBUG > 2
-	fprintf(stderr, "%s() returning %p\n", __FUNCTION__, g_xDisplay);
+	fprintf(stderr, "%s() returning %p\n", __FUNCTION__, dpy);
 #endif
-	return g_xDisplay;
+	return dpy;
 }
 
-extern int XCloseDisplay(Display *dpy)
-{
-#if DEBUG > 2
-	fprintf(stderr, "%s(%p)\n", __FUNCTION__, dpy);
-#endif
-
-	return True;
-}
-
+#if 0
 extern int XGrabKeyboard(Display *dpy, Window win, Bool oe, int pm, int km, Time t)
 {
 #if DEBUG > 2
@@ -858,6 +848,7 @@ extern int XUngrabPointer(Display *dpy, Time t)
 #endif
 	return GrabSuccess;
 }
+#endif
 
 #if 0
 extern int XGrabServer(Display *dpy)
