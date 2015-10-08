@@ -971,6 +971,7 @@ extern void *dlsym(void *handle, const char *symbol)
 	fprintf(stderr, "%s(%p, %s)\n", __FUNCTION__, handle, symbol);
 #endif
 
+	/* Redirect these symbols through our ones */
 	if (
 		strcmp(symbol, "SteamAPI_Init") == 0 ||
 		strcmp(symbol, "SteamAPI_InitSafe") == 0 ||
