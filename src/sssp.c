@@ -764,15 +764,17 @@ extern int XGrabKeyboard(Display *dpy, Window win, Bool oe, int pm, int km, Time
 	return GrabSuccess;
 }
 
-extern int XGrabPointer(Display *dpy, Window win, Bool oe, uint32_t em, int pm, int km, Window ct, Cursor c, Time t)
-{
-	log(LOG_DEBUG, "%s(%p, 0x%lx, %d, 0x%x, 0x%x, 0x%x, 0x%lx, 0x%lx, 0x%lx)\n", __FUNCTION__, dpy, win, oe, em, pm, km, ct, c, t);
-	return GrabSuccess;
-}
-
 extern int XUngrabKeyboard(Display *dpy, Time t)
 {
 	log(LOG_DEBUG, "%s(%p, 0x%lx)\n", __FUNCTION__, dpy, t);
+	return GrabSuccess;
+}
+#endif
+
+#if 0
+extern int XGrabPointer(Display *dpy, Window win, Bool oe, uint32_t em, int pm, int km, Window ct, Cursor c, Time t)
+{
+	log(LOG_DEBUG, "%s(%p, 0x%lx, %d, 0x%x, 0x%x, 0x%x, 0x%lx, 0x%lx, 0x%lx)\n", __FUNCTION__, dpy, win, oe, em, pm, km, ct, c, t);
 	return GrabSuccess;
 }
 
@@ -781,16 +783,18 @@ extern int XUngrabPointer(Display *dpy, Time t)
 	log(LOG_DEBUG, "%s(%p, 0x%lx)\n", __FUNCTION__, dpy, t);
 	return GrabSuccess;
 }
+#endif
 
+#if 0
 extern int XGrabServer(Display *dpy)
 {
-	log(LOG_DEBUG, "%s()\n", __FUNCTION__);
+	log(LOG_DEBUG, "%s(%p)\n", __FUNCTION__, dpy);
 	return AlreadyGrabbed;
 }
 
 extern int XUngrabServer(Display *dpy)
 {
-	log(LOG_DEBUG, "%s()\n", __FUNCTION__);
+	log(LOG_DEBUG, "%s(%p)\n", __FUNCTION__, dpy);
 	return 0;
 }
 #endif
