@@ -757,7 +757,7 @@ extern Display *XOpenDisplay(const char *name)
 	return dpy;
 }
 
-#if 0
+#if 1
 extern int XGrabKeyboard(Display *dpy, Window win, Bool oe, int pm, int km, Time t)
 {
 	log(LOG_DEBUG, "%s(%p, 0x%lx, %d, 0x%x, 0x%x, 0x%lx)\n", __FUNCTION__, dpy, win, oe, pm, km, t);
