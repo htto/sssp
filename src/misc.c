@@ -33,10 +33,10 @@ log_dolog(enum LogLevel ll, const char *func,
 		switch (ll)
 		{
 			case LOG_ERROR:
-				fprintf(stderr, "ERR %s\n", str);
+				fprintf(stderr, "ERR %s", str);
 				break;
 			default:
-				fprintf(stdout, "DL%d %s\n", ll, str);
+				fprintf(stdout, "DL%d %s", ll, str);
 		}
 	}
 }
