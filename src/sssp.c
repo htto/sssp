@@ -166,6 +166,19 @@ __attribute__((constructor)) static void init(void)
 	if (program_invocation_name)
 		program_invocation_short_name = basename(program_invocation_name);
 #endif
+
+	if (
+			// System paths /bin, /sbin are filtered
+			strncmp(program_invocation_name, "/bin", 4) == 0 ||
+			strncmp(program_invocation_name, "/sbin", 5) == 0 ||
+			// Steam executables are filtered
+			strncmp(program_invocation_short_name, "steam", 5) == 0 ||
+			strncmp(program_invocation_short_name, "steamwebhelper", 14) == 0 ||
+			strncmp(program_invocation_short_name, "streaming_client", 16) == 0
+	)
+		return;
+
+
 	log(LOG_NOTICE, "sssp_xy.so loaded into program '%s' (%s).\n",
 			program_invocation_short_name, program_invocation_name);
 
@@ -175,7 +188,6 @@ __attribute__((constructor)) static void init(void)
 	if (ssspRunning)
 	{
 		log(LOG_ERROR, "SSSP already loaded! Check your LD_PRELOAD.\n");
-		/* TODO don't fail? */
 		return;
 	}
 
@@ -225,11 +237,14 @@ __attribute__((constructor)) static void init(void)
 __attribute__((destructor)) static void deinit(void)
 {
 	/* TODO */
-	log(LOG_NOTICE, "sssp_xy.so being unloaded from program '%s' (%s).\n",
-			program_invocation_short_name, program_invocation_name);
+	if (ssspRunning)
+	{
+		log(LOG_NOTICE, "sssp_xy.so being unloaded from program '%s' (%s).\n",
+				program_invocation_short_name, program_invocation_name);
 
-	if (g_userFbTimer)
-		timer_delete(g_userFbTimer);
+		if (g_userFbTimer)
+			timer_delete(g_userFbTimer);
+	}
 }
 
 /**
