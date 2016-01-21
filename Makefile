@@ -14,15 +14,15 @@ LIBS=$(shell pkg-config --libs $(X11_LIBS)) $(SYSTEM_LIBS)
 HDRS=src/sssp.h
 SRCS=src/misc.c src/sssp.c
 
-COMPILE=$(CC) $(SHFLAGS) $(DEFINES) $(INCS) $(LIBS) $(WFLAGS) $(CFLAGS)
+COMPILE_FLAGS=$(SHFLAGS) $(DEFINES) $(INCS) $(LIBS) $(WFLAGS) $(CFLAGS)
 
 all: sssp_32.so sssp_64.so
 
 sssp_32.so: $(HDRS) $(SRCS)
-	$(COMPILE) -m32 $^ -o $@
+	$(CC) -m32 $^ -o $@ $(COMPILE_FLAGS)
 
 sssp_64.so: $(HDRS) $(SRCS)
-	$(COMPILE) -m64 $^ -o $@
+	$(CC) -m64 $^ -o $@ $(COMPILE_FLAGS)
 
 test: test.c sssp_32.so
 	$(CC) -m32 -Lcontrib/lib32 -lsteam_api $(WFLAGS) $(CFLAGS) $< -o $@
