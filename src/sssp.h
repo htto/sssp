@@ -63,7 +63,7 @@ extern enum LogLevel g_logLevel;
 static inline Bool
 log_check(enum LogLevel ll)
 {
-	return  ll > LOG_NONE && ll < LOG_MAX && ll < g_logLevel;
+	return  ll > LOG_NONE && ll < LOG_MAX && ll <= g_logLevel;
 }
 
 extern void
