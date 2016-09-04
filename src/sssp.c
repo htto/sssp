@@ -26,6 +26,8 @@
 /* Hooks */
 hookFunc g_realSteamAPI_Init;
 hookFunc g_realSteamAPI_InitSafe;
+hookPFunc g_realXCheckIfEvent;
+hookPFunc g_realXCreateWindow;
 hookPFunc g_realXEventsQueued;
 hookPFunc g_realXLookupString;
 hookPCPFunc g_realXOpenDisplay;
@@ -200,12 +202,19 @@ __attribute__((constructor)) static void init(void)
 		return;
 	}
 
+	g_realXCheckIfEvent = (hookPFunc)findHook(NULL, "XCheckIfEvent");
+	g_realXCreateWindow = (hookPFunc)findHook(NULL, "XCreateWindow");
 	g_realXEventsQueued = (hookPFunc)findHook(NULL, "XEventsQueued");
 	g_realXLookupString = (hookPFunc)findHook(NULL, "XLookupString");
 	g_realXOpenDisplay = (hookPCPFunc)findHook(NULL, "XOpenDisplay");
 	g_realXPending = (hookPFunc)findHook(NULL, "XPending");
 
-	if (!(g_realXEventsQueued && g_realXLookupString && g_realXOpenDisplay && g_realXPending))
+	if (!g_realXCheckIfEvent ||
+		!g_realXCreateWindow ||
+		!g_realXEventsQueued ||
+		!g_realXLookupString ||
+		!g_realXOpenDisplay ||
+		!g_realXPending)
 	{
 		log(LOG_ERROR, "Unable to set up X11 hooks. Won't work this way. "
 				"Please disable this module from being LD_PRELOAD'ed.\n");
@@ -578,18 +587,21 @@ static Bool filter(Display *dpy UNUSED, XEvent *event, XPointer arg UNUSED)
 	return rc;
 }
 
-static void handleRequest(Display *dpy)
+static Bool handleRequest(Display *dpy)
 {
 	XEvent e;
 
 	if (!g_steamInitialized)
-		return;
+		return False;
 
 	/* TODO reduce eventqueue search */
-	if (XCheckIfEvent(dpy, &e, filter, NULL))
+	if (g_realXCheckIfEvent(dpy, &e, filter, NULL))
 	{
 		handleScreenShot(dpy, ((XAnyEvent*)&e)->window);
+		return True;
 	}
+
+	return False;
 }
 
 static Bool steamPrepare(void)
@@ -773,12 +785,13 @@ extern Display *XOpenDisplay(const char *name)
 }
 
 #if 1
+// Fake keyboard grabbing to be able to switch windows.
 extern int XGrabKeyboard(Display *dpy, Window win, Bool oe, int pm, int km, Time t)
 {
 	log(LOG_DEBUG, "%s(%p, 0x%lx, %d, 0x%x, 0x%x, 0x%lx)\n", __FUNCTION__, dpy, win, oe, pm, km, t);
 	return GrabSuccess;
 }
-
+// Reverse for the above.
 extern int XUngrabKeyboard(Display *dpy, Time t)
 {
 	log(LOG_DEBUG, "%s(%p, 0x%lx)\n", __FUNCTION__, dpy, t);
@@ -787,12 +800,14 @@ extern int XUngrabKeyboard(Display *dpy, Time t)
 #endif
 
 #if 0
+// Fake mouse grabbing to be able use it in other windows
+// Disabled per default, as it might brake game input.
 extern int XGrabPointer(Display *dpy, Window win, Bool oe, uint32_t em, int pm, int km, Window ct, Cursor c, Time t)
 {
 	log(LOG_DEBUG, "%s(%p, 0x%lx, %d, 0x%x, 0x%x, 0x%x, 0x%lx, 0x%lx, 0x%lx)\n", __FUNCTION__, dpy, win, oe, em, pm, km, ct, c, t);
 	return GrabSuccess;
 }
-
+// Reverse for the above.
 extern int XUngrabPointer(Display *dpy, Time t)
 {
 	log(LOG_DEBUG, "%s(%p, 0x%lx)\n", __FUNCTION__, dpy, t);
@@ -801,18 +816,61 @@ extern int XUngrabPointer(Display *dpy, Time t)
 #endif
 
 #if 0
+// Fake server grabbing to be able to do stuff.
+// Disabled per default, as it might brake game input.
 extern int XGrabServer(Display *dpy)
 {
 	log(LOG_DEBUG, "%s(%p)\n", __FUNCTION__, dpy);
 	return AlreadyGrabbed;
 }
-
+// Reverse for the above.
 extern int XUngrabServer(Display *dpy)
 {
 	log(LOG_DEBUG, "%s(%p)\n", __FUNCTION__, dpy);
 	return 0;
 }
 #endif
+
+#if 1
+Window XCreateWindow(
+	Display *display,
+	Window parent,
+	int x, int y,
+	unsigned int width, unsigned int height,
+	unsigned int border_width,
+	int depth,
+	unsigned int class,
+	Visual *visual,
+	unsigned long valuemask,
+	XSetWindowAttributes *attributes)
+{
+	// I want my windows window manager managed...
+	// https://specifications.freedesktop.org/wm-spec/wm-spec-1.3.html
+	if (attributes)
+	{
+		// TODO _NET_WM_STATE(ATOM) = _NET_WM_STATE_FULLSCREEN
+		attributes->override_redirect = False;
+	}
+
+	return g_realXCreateWindow(display, parent, x, y, width, height, border_width, depth, class, visual, valuemask, attributes);
+}
+#endif
+
+extern Bool XCheckIfEvent(Display *dpy, XEvent *event_return,
+	Bool (*predicate)(), XPointer arg)
+{
+	Bool r;
+
+	log(LOG_DEBUG, "%s()\n", __FUNCTION__);
+
+	// Check for our key interception first
+	handleRequest(dpy);
+	r = g_realXCheckIfEvent(dpy, event_return, predicate, arg);
+
+	log(LOG_DEBUG, "%s() returning %d\n", __FUNCTION__, r);
+
+	return r;
+}
 
 extern int XEventsQueued(Display *dpy, int mode)
 {
@@ -831,6 +889,7 @@ extern int XLookupString(XKeyEvent *ke, char *bufret, int bufsiz,
 	if (filter(ke->display, (XEvent *)ke, NULL))
 	{
 		handleScreenShot(ke->display, ke->window);
+		// FIXME eat event instead of propagating it
 	}
 	log(LOG_DEBUG, "%s() calling real\n", __FUNCTION__);
 	int rc = g_realXLookupString(ke, bufret, bufsiz, keysym, status_in_out);
