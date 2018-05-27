@@ -10,12 +10,115 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define KEY_MAX 128
+#define VAL_MAX 2048
 #define iprint(indent, args...) \
 { \
     for (size_t i = 0; i < indent; i++) { \
         fprintf(stderr, " "); \
     } \
     fprintf(stderr, args); \
+}
+
+enum {
+    TYPE_COLLECTION = 0,
+    TYPE_STRING,
+    TYPE_INTEGER,
+    TYPE_FLOAT,
+    TYPE_POINTER,
+    TYPE_WSTRING,
+    TYPE_COLOR,
+    TYPE_UNSIGNED_INTEGER,
+    TYPE_END
+};
+
+typedef struct statsnode_s
+{
+    u_int8_t type;
+    char name[KEY_MAX];
+    void *data;
+    size_t datalen;
+    struct statsnode_s *parent;
+    struct statsnode_s **children;
+    ssize_t numchildren;
+} statsnode_t;
+
+size_t collect(const char *data, size_t size, size_t offset, statsnode_t *node)
+{
+    u_int8_t type;
+    char value[VAL_MAX];
+    size_t keylen = 0;
+    size_t vallen = 0;
+    size_t off = offset;
+    u_int16_t len;
+    statsnode_t *child;
+
+    while (off < size) {
+        // Get type
+        type = *(data + off++);
+
+        // EON
+        if (type == TYPE_END) {
+            break;
+        }
+
+        // Add a new node holding the data to our parent
+        node->numchildren++;
+        node->children = realloc(node->children, node->numchildren * sizeof(node));
+        child = node->children[node->numchildren - 1] = calloc(1, sizeof(*node));
+        child->parent = node;
+
+
+        // Set type and name
+        child->type = type;
+        keylen = strlen(data + off) + 1;
+        assert(keylen < KEY_MAX);
+        strncpy(child->name, data + off, keylen);
+        child->name[keylen - 1] = 0;
+        off += keylen;
+
+        switch (type) {
+            case TYPE_COLLECTION:
+                off += collect(data, size, off, child);
+                break;
+            case TYPE_STRING:
+                vallen = strlen(data + off) + 1;
+                strncpy(value, data + off, vallen);
+                value[vallen - 1] = 0;
+                break;
+            case TYPE_INTEGER:
+                vallen = 4;
+                snprintf(value, 20, "%d", *((int32_t*)(data + off)));
+                break;
+            case TYPE_FLOAT:
+                vallen = 4;
+                break;
+            case TYPE_POINTER:
+                vallen = 4;
+                break;
+            case TYPE_WSTRING:
+                len = *(data + off) << 8 | *(data + off + 1);
+                vallen = 2 + sizeof(wchar_t) * len;
+                break;
+            case TYPE_COLOR:
+                vallen = 4; // 4 char
+                break;
+            case TYPE_UNSIGNED_INTEGER:
+                vallen = 8;
+                break;
+        }
+
+        if (type != TYPE_COLLECTION) {
+            child->datalen = vallen;
+            assert(!child->data);
+            child->data = malloc(vallen);
+            memcpy(child->data, value, vallen);
+        }
+
+        off += vallen;
+    }
+
+    return off - offset;
 }
 
 size_t dump(const char *data, size_t size, size_t offset, size_t indent)
@@ -27,7 +130,6 @@ size_t dump(const char *data, size_t size, size_t offset, size_t indent)
     size_t vallen = 0;
     size_t off = offset;
     u_int16_t len;
-
 
     while (off < size) {
         type = *(data + off++);
@@ -108,6 +210,8 @@ int main(int argc, char **argv)
     char *data;
     const char *file = argv[1];
     size_t size;
+    statsnode_t root;
+    bzero(&root, sizeof(root));
 
     FILE *fp = fopen(file, "r");
     if (fp) {
@@ -116,6 +220,7 @@ int main(int argc, char **argv)
         fseek(fp, 0, SEEK_SET);
         data = malloc(size);
         fread(data, size, 1, fp);
+        collect(data, size, 0, &root);
         dump(data, size, 0, 0);
         free(data);
         fclose(fp);
