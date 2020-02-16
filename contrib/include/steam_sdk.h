@@ -140,3 +140,6 @@ extern int32_t SteamAPI_GetHSteamPipe(void);
 extern int32_t SteamAPI_GetHSteamUser(void);
 extern const char *SteamAPI_GetSteamInstallPath(void);
 extern void *SteamService_GetIPCServer(void);
+
+extern void SteamAPI_RegisterCallback(void *pCallbackBase, int iCallback);
+extern void SteamAPI_RunCallbacks();

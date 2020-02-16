@@ -1,6 +1,6 @@
-ARCH=$(shell arch)
+ARCH=$(shell uname -m)
 CFLAGS=-march=native -Og -ggdb
-DEFINES=-DDFLT_LOG_LEVEL=2 -D_GNU_SOURCE
+DEFINES=-DDFLT_LOG_LEVEL=3 -D_GNU_SOURCE
 SHFLAGS=-fPIC -shared
 WFLAGS=-Wall -Wextra
 
@@ -38,7 +38,7 @@ $(A64_TARGET): $(HDRS) $(SRCS)
 	$(CC) $(A64_FLAGS) $^ -o $@ $(COMPILE_FLAGS)
 
 test: test.c $(A$(ARCH)_TARGET)
-	$(CC) $(A$(ARCH)_FLAGS) $< -o $@ $(WFLAGS) $(CFLAGS) -L$(A$(ARCH)_CONTRIB) -lsteam_api
+	$(CC) $(A$(ARCH)_FLAGS) $^ -o $@ $(WFLAGS) $(CFLAGS) -L$(A$(ARCH)_CONTRIB) -lsteam_api 
 
 test_simple: test
 	env LD_LIBRARY_PATH=$(A$(ARCH)_CONTRIB) LD_PRELOAD=./$(A$(ARCH)_TARGET) ./test

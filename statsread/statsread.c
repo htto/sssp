@@ -68,7 +68,6 @@ size_t collect(const char *data, size_t size, size_t offset, statsnode_t *node)
         child = node->children[node->numchildren - 1] = calloc(1, sizeof(*node));
         child->parent = node;
 
-
         // Set type and name
         child->type = type;
         keylen = strlen(data + off) + 1;
@@ -77,6 +76,7 @@ size_t collect(const char *data, size_t size, size_t offset, statsnode_t *node)
         child->name[keylen - 1] = 0;
         off += keylen;
 
+        // @fixme assert there's enough room in the source buffer
         switch (type) {
             case TYPE_COLLECTION:
                 off += collect(data, size, off, child);
