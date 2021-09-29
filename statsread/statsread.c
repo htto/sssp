@@ -15,9 +15,9 @@
 #define iprint(indent, args...) \
 { \
     for (size_t i = 0; i < indent; i++) { \
-        fprintf(stderr, " "); \
+        fprintf(stdout, " "); \
     } \
-    fprintf(stderr, args); \
+    fprintf(stdout, args); \
 }
 
 enum {
